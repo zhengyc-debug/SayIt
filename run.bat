@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
@@ -30,8 +30,9 @@ if not exist ".env" (
 )
 
 echo ============================================
-echo  SayIt  http://127.0.0.1:8787   （仅本机）
-echo  手机访问请用 run_https.bat
+echo  SayIt  http://127.0.0.1:8787   （仅本机，开发用）
+echo  线上部署见 DEPLOY.md（nginx + systemd）
 echo ============================================
-".venv\Scripts\python.exe" tools\serve.py --http --reload
+".venv\Scripts\python.exe" tools\serve.py
+if errorlevel 1 echo [i] 服务已退出 (exit %errorlevel%)
 pause

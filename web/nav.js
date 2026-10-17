@@ -1,5 +1,22 @@
 /* 底部标签栏：全站共用一份，改这里所有页面同步 */
 (() => {
+  // ---- 登录失效兜底：任何 /api/ 请求返回 401 就整页跳登录页 ----
+  // 各页面都自己写 fetch，逐个加判断容易漏，包一层最省事。
+  const origFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await origFetch(...args);
+    if (res.status === 401) {
+      const url = String(args[0] && args[0].url ? args[0].url : args[0] || '');
+      if (url.includes('/api/') && !url.includes('/api/auth-state')) {
+        location.replace('/login?next=' + encodeURIComponent(location.pathname));
+      }
+    }
+    return res;
+  };
+
+  // 登录页不显示标签栏
+  if (location.pathname === '/login') return;
+
   const I = {
     call: '<path d="M4.5 4.5h3l1.5 4-2 1.5a11 11 0 0 0 5 5l1.5-2 4 1.5v3a1.5 1.5 0 0 1-1.6 1.5A16.5 16.5 0 0 1 3 6.1 1.5 1.5 0 0 1 4.5 4.5z"/>',
     history: '<circle cx="12" cy="12" r="8.2"/><path d="M12 7.6V12l3 1.8"/>',

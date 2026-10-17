@@ -40,6 +40,11 @@
         <div class="t2">换供应商 / 音色 / 复盘用的文本模型</div></div>
       <div class="arr">›</div>
     </a>
+    <div style="border-top:1px solid var(--line);padding:10px 0;display:flex;align-items:center;gap:10px">
+      <div class="meta"><div class="t1" id="who">当前账号</div>
+        <div class="t2" id="who-sub">—</div></div>
+      <button class="btn sm" id="logout" style="margin-left:auto">退出登录</button>
+    </div>
   </div>
 </div>
 
@@ -95,6 +100,19 @@ $('save').onclick = async () => {
 };
 
 if (window.I18N) I18N.mountSwitch($('lang-host'));
+
+// 显示当前登录账号 + 退出
+fetch('/api/auth-state').then(r => r.json()).then(d => {
+  if (!d.logged_in) { location.replace('/login'); return; }
+  $('who').textContent = d.user.display_name || d.user.username;
+  $('who-sub').textContent = d.user.display_name && d.user.display_name !== d.user.username
+    ? `账号 ${d.user.username}` : '已登录';
+}).catch(() => {});
+
+$('logout').onclick = async () => {
+  await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+  location.replace('/login');
+};
 
 load().catch(e => {
   $('profile').innerHTML = `<div class="empty" style="color:#ffb3b3">加载失败：${esc(e.message)}</div>`;

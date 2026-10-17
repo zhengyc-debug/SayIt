@@ -42,9 +42,10 @@ echo "== 2/7 建系统用户 =="
 if ! id -u "$APP_USER" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$APP_DIR" --shell /usr/sbin/nologin "$APP_USER"
 fi
-mkdir -p "$APP_DIR/data" "$APP_DIR/certs"
+mkdir -p "$APP_DIR/data" "$APP_DIR/log"
 
-echo "== 3/7 Python 虚拟环境 + 依赖 =="
+echo "== 3/7ls
+"
 if [[ ! -x "$APP_DIR/.venv/bin/python" ]]; then
   python3 -m venv "$APP_DIR/.venv"
 fi
@@ -101,7 +102,7 @@ if [[ "$CERT_MODE" == "certbot" ]]; then
   sed "s/sayit\.example\.com/$DOMAIN/g" "$APP_DIR/deploy/nginx-sayit.conf" \
     > /etc/nginx/sites-available/sayit
   nginx -t && systemctl reload nginx
-  systemctl enable --now certbot.timer 2>/dev/null || true
+  systemctl apnull || true
   echo "   已启用 443，证书自动续期（systemctl list-timers | grep certbot）"
 else
   echo "   跳过。下一步按 DEPLOY.md 第 6 步做：腾讯云免费证书 or certbot，"

@@ -85,14 +85,15 @@ uvicorn app.main:app  ──WSS──▶  豆包实时语音 API
 
 ## 3. 把代码传上去
 
-在你 Windows 的 git-bash 里（不要传 `.venv`、`certs`、`tmp`）：
+在你 Windows 的 git-bash 里（不要传 `.venv`、`tmp`、`log`、`data/users.csv`）：
 
 ```bash
 cd /e/SayIt
 
-# 打包（排除 Windows 专用和本机证书、缓存）
-tar --exclude='./.venv' --exclude='./tmp' --exclude='./certs' \
+# 打包（排除本机虚拟环境、缓存、日志、以及本机的账号和配置）
+tar --exclude='./.venv' --exclude='./tmp' --exclude='./log' \
     --exclude='__pycache__' --exclude='./data/recordings' \
+    --exclude='./data/users.csv' --exclude='./data/settings.json' \
     -czf /tmp/sayit.tgz .
 
 scp /tmp/sayit.tgz root@你的公网IP:/tmp/
@@ -235,28 +236,34 @@ echo '0 4 * * * bash /opt/sayit/deploy/backup.sh' | crontab -
 
 ---
 
-## 9. 加一层访问密码（强烈建议）
+## 9. 登录（应用自带，不用 nginx auth_basic）
 
-应用没有登录系统，公网暴露 = 任何人拿到地址都能烧你的 API 额度、看你的通话记录。
-
-```bash
-apt install -y apache2-utils
-htpasswd -c /etc/nginx/.htpasswd 你的用户名     # 输入两次密码
-```
-
-然后在 `/etc/nginx/sites-available/sayit` 的 443 server 块里加：
-
-```nginx
-auth_basic           "SayIt";
-auth_basic_user_file /etc/nginx/.htpasswd;
-```
+应用已经有登录系统：账号在 `data/users.csv`，格式 `用户名,密码,显示名`。
 
 ```bash
-nginx -t && systemctl reload nginx
+# 部署后第一件事：改掉默认密码
+ssh root@你的公网IP
+vi /opt/sayit/data/users.csv
+chown sayit:sayit /opt/sayit/data/users.csv
+chmod 600 /opt/sayit/data/users.csv
 ```
 
-手机第一次打开会弹一次账号密码框，之后浏览器会记住（WebSocket 也会带上这层认证）。
-「添加到主屏幕」的 PWA 同样适用。
+密码想放哈希就先在本机生成：
+
+```bash
+python -m app.auth hash '你的密码'
+# pbkdf2_sha256$260000$...$...  ← 粘到 CSV 第二列
+```
+
+`.env` 里务必设一个固定的 `SECRET_KEY`（否则每次重启服务所有人要重新登录）：
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+# 写进 /opt/sayit/.env 的 SECRET_KEY=
+systemctl restart sayit
+```
+
+**不要再加 nginx `auth_basic`**：那样 WebSocket 拿不到登录态，而且手机上弹原生密码框体验很差。应用层的登录已覆盖所有页面、接口和 `/ws/call`。
 
 > 想要更彻底的隔离：安全组里把 443 只放行你常用的 IP 段，或者用腾讯云「私有网络/白名单」。
 

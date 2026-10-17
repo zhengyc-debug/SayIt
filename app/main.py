@@ -32,10 +32,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
-from . import db, profile, review
+from . import auth, db, profile, review
 from .config import (
     DATA_DIR,
     WEB_DIR,
@@ -90,6 +91,52 @@ async def no_cache_static(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
+
+
+# ---------------------------------------------------------------------------
+# 登录门禁：除了登录页本身，所有页面/接口都要求已登录。
+# 不用 nginx auth_basic 的原因：那样 WebSocket 拿不到登录态，且浏览器弹窗体验差。
+# ---------------------------------------------------------------------------
+PUBLIC_PATHS = {
+    "/login",          # 登录页
+    "/api/login",      # 登录接口
+    "/api/auth-state", # 前端判断要不要跳登录页
+}
+PUBLIC_PREFIXES = ("/static/",)
+
+
+def _is_public(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    path = request.url.path
+    if _is_public(path):
+        return await call_next(request)
+
+    user = auth.current_user(request)
+    if user is None:
+        # 接口返回 401 让前端跳转，页面直接 302 —— 少一次 JS 往返
+        if path.startswith("/api/"):
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+        return RedirectResponse(url=f"/login?next={path}", status_code=303)
+
+    request.state.user = user
+    return await call_next(request)
+
+
+# 登录态 = 签名 cookie。
+# 注意 add_middleware 是 LIFO：最后加的跑在最外层。这里必须放在 require_login
+# 之后，否则 SessionMiddleware 会在门禁内侧，request.session 直接取不到。
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=auth.session_secret(),
+    session_cookie="sayit_session",
+    max_age=auth.COOKIE_MAX_AGE,
+    same_site="lax",
+    https_only=False,   # 线上走 nginx 的 https，但应用本身只见 http，置 True 会丢 cookie
+)
 
 
 # ===========================================================================
@@ -165,20 +212,50 @@ async def api_test_provider(request: Request) -> dict[str, Any]:
                 pass
 
 
-@app.get("/ca.cer")
-async def ca_cert():
-    """把自签根证书直接发给手机浏览器 —— 手机点这个链接就能安装，
-    不用先传文件过去。（Android/iOS 都认这个 MIME 类型并弹安装提示）"""
-    from fastapi.responses import Response as RawResponse
+@app.get("/api/auth-state")
+async def api_auth_state(request: Request) -> dict[str, Any]:
+    """前端启动时问一句「我登录了吗」。未登录也返回 200，不要 401，
+    否则前端得靠捕获异常来判断，容易和其它错误混在一起。"""
+    user = auth.current_user(request)
+    return {"logged_in": user is not None, "user": user}
 
-    cert = (DATA_DIR.parent / "certs" / "sayit-ca.cer")
-    if not cert.exists():
-        raise HTTPException(404, "证书还没生成，先在电脑上跑 run_https.bat")
-    return RawResponse(
-        content=cert.read_bytes(),
-        media_type="application/x-x509-ca-cert",
-        headers={"Content-Disposition": 'attachment; filename="sayit-ca.cer"'},
-    )
+
+@app.post("/api/login")
+async def api_login(request: Request) -> JSONResponse:
+    ip = (request.client.host if request.client else "") or "unknown"
+    remaining = auth.lock_remaining(ip)
+    if remaining:
+        return JSONResponse(status_code=429, content={
+            "ok": False, "message": f"密码错误次数过多，请 {remaining // 60 + 1} 分钟后再试"})
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    username = str(body.get("username") or "")
+    password = str(body.get("password") or "")
+
+    user = auth.check_login(username, password)
+    if user is None:
+        auth.record_fail(ip)
+        log.warning("登录失败 user=%r ip=%s", username[:32], ip)
+        return JSONResponse(status_code=200, content={
+            "ok": False, "message": "用户名或密码不正确"})
+
+    auth.clear_fails(ip)
+    auth.login_session(request, user)
+    log.info("登录成功 user=%s ip=%s", user["username"], ip)
+    return JSONResponse(content={"ok": True, "user": user,
+                                 "next": str(body.get("next") or "/")})
+
+
+@app.post("/api/logout")
+async def api_logout(request: Request) -> dict[str, Any]:
+    user = auth.current_user(request)
+    auth.logout_session(request)
+    if user:
+        log.info("登出 user=%s", user["username"])
+    return {"ok": True}
 
 
 @app.get("/api/health")
@@ -346,6 +423,12 @@ async def api_session_detail(session_id: str) -> dict[str, Any]:
 # ===========================================================================
 @app.websocket("/ws/call")
 async def ws_call(ws: WebSocket) -> None:
+    # 鉴权必须在 accept 之前：未登录直接拒握手，浏览器拿不到任何音频通路
+    user = auth.user_from_websocket(ws)
+    if user is None:
+        await ws.close(code=4401)   # 自定义码：4401 = 未登录
+        log.info("WS 拒绝未登录连接 ip=%s", ws.client.host if ws.client else "?")
+        return
     await ws.accept()
     provider = None
     session_id = ""
@@ -606,6 +689,14 @@ async def _pump(ws: WebSocket, provider: Any, session_id: str) -> None:
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/login")
+async def login_page(request: Request):
+    """已登录的人再访问登录页就直接送回去，省得误点。"""
+    if auth.current_user(request):
+        return RedirectResponse(url="/", status_code=303)
+    return FileResponse(WEB_DIR / "login.html")
 
 
 @app.get("/settings")

@@ -1,6 +1,7 @@
 # secrets
 .env
 data/settings.json
+data/users.csv
 data/*.db
 data/recordings/
 data/*.db-journal

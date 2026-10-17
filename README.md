@@ -10,11 +10,32 @@
 
 ```bash
 cd E:\SayIt
-run_https.bat        # 手机 + 电脑都要用（含局域网 HTTPS）
-run.bat              # 只在本机用、且不想折腾证书
+run.bat              # 本机开发：http://127.0.0.1:8787
 ```
 
-两个 .bat 都会：自动建项目 venv（首次）→ 装依赖 → 清 PYTHONPATH → 启动。
+线上部署（nginx + systemd + 真证书）见 [`DEPLOY.md`](DEPLOY.md)。
+
+`.bat` 会自动：建项目 venv（首次）→ 装依赖 → 清 PYTHONPATH → 启动。
+
+### 登录
+
+单人使用，账号写在 `data/users.csv` 里，格式 `用户名,密码,显示名`：
+
+```csv
+username,password,display_name
+admin,change-me-please,郑昱川
+```
+
+- 密码可以直接写明文，也可以写 `pbkdf2_sha256` 哈希：
+  `python -m app.auth hash 你的密码` 生成后粘到第二列
+- 改完**不用重启**，下次登录即生效；把某人从文件里删掉，他的登录态立即失效
+- 所有页面和 `/api/*` 都要求登录，未登录的页面请求 303 跳 `/login`、接口返回 401
+- WebSocket 同样鉴权，未登录直接拒绝握手（close code `4401`，前端收到就跳登录页）
+- cookie 签名用 `.env` 的 `SECRET_KEY`，不填会随机生成 —— 代价是每次重启都要重新登录
+- 同一 IP 5 分钟内错 8 次，锁定 5 分钟
+- 退出入口在「我的」页底部
+
+`data/users.csv` 已在 `.gitignore` 里，不进 Git。格式参考 `data/users.example.csv`。
 
 ### 运行环境（重要）
 
@@ -63,103 +84,8 @@ UI 约定：
 * 矮屏（`max-height:720px`）自动缩小头像和字幕区，媒体查询要写在基础规则之后
 * 页面底部留 `--nav-h` 的 padding，避免内容被固定标签栏盖住
 
-> 想彻底不折腾手机证书？**部署到云服务器 + 域名 + 真证书**，见 [`DEPLOY.md`](DEPLOY.md)。
-> 目标形态：`https://sayit.你的域名.com`，手机什么都不用装，4G 也能用。
-
-### 手机访问（必须 HTTPS）
-
-浏览器规定：页面不在 `localhost` 上时，必须 HTTPS 才允许用麦克风。所以手机不能开 `http://`。
-
-```bash
-run_https.bat
-# 等价于 python tools/serve.py
-```
-
-它一次做完四件事：
-1. 找出本机所有 IPv4，用 `cryptography` 签发**带正确 SAN** 的自签证书（IP 换了会自动重签）
-2. 绑 `0.0.0.0:8787`（默认的 `127.0.0.1` 手机连不上）
-3. 加防火墙放行规则 `SayIt 8787`（需管理员）
-4. 打印手机上该用的地址
-
-启动后控制台会直接告诉你 `手机：https://192.168.x.x:8787 <<< 用这个`。
-
-#### ⚠ 手机必须先安装证书，否则一定连不上通话
-
-自签证书在手机上会有一个很容易误判的坑：
-
-- **页面能打开**（可以点"高级 → 继续前往"跳过警告）
-- **但 WebSocket 连不上**（页面里显示"连接服务端失败"）
-
-原因：跳过证书警告只对"页面导航"生效，`wss://` 握手没有任何可点击的"继续前往"，
-浏览器直接拒绝为不受信任的证书建立 WebSocket。（本机用 `curl -k` / 桌面端看不出问题，
-一上手机就废。）
-
-**解决（1 分钟）**：在手机浏览器里直接打开
-
-```
-https://192.168.3.8:8787/ca.cer
-```
-
-下载后安装为受信任根证书：
-
-* **Android**：设置 → 安全 → 加密与凭据 → 安装证书 → **CA 证书** → 选刚下载的文件
-  （会提示"你的数据可能被监视"，这是用户装 CA 的标准提示，确认即可）
-* **iOS**：用 Safari 打开上面的链接 → 允许下载描述文件 →
-  设置 → 已下载描述文件 → 安装 → 最后必须再去
-  **设置 → 通用 → 关于本机 → 证书信任设置 → 打开"SayIt Local"的完全信任**
-  （iOS 少这一步就还是不通）
-
-装完刷新页面，地址栏不再报警告，通话就能接通了。
-
-> 嫌麻烦想跳过这一步？见下一节。
-
-### 手机上不想装证书：三条路（都能免掉「安装 CA」）
-
-先说清楚一条硬规则：**麦克风只在「安全上下文」里可用** —— `https://` 或 `localhost`。
-`http://192.168.x.x` 永远拿不到麦克风，这是浏览器定的，不是本项目的限制。
-所以「不装证书」本质上是「换一个浏览器已经信任的地址」，只有下面几条：
-
-| 方案 | 手机要装什么 | 需要联网 | 延迟 | 适用 |
-|---|---|---|---|---|
-| **A. USB 反向转发**（`tools/usb-android.bat`） | 什么都不装 | 不用 | 最低 | **Android**，自己练最省事 |
-| **B. 真域名 + 免费 DV 证书** | 什么都不装 | 不用（解析到内网 IP 即可） | 最低 | 长期用，iPhone/Android 都行，最推荐 |
-| **C. 临时隧道**（`tools/tunnel.bat`） | 什么都不装 | 要 | 高 | 临时给 iPhone 试一下 |
-| （基线）自签证书 + 装 CA | 装一次 CA | 不用 | 最低 | 不想买域名时 |
-
-**A. USB 反向转发（Android，零成本）**
-
-```bat
-run.bat                  :: 终端 1：纯 HTTP，只绑 127.0.0.1
-tools\usb-android.bat    :: 终端 2：adb reverse tcp:8787 tcp:8787
-```
-手机浏览器打开 `http://localhost:8787`。`localhost` 属于安全上下文，麦克风照常可用，
-完全不涉及证书；手机得插着 USB（拔了重插，重跑一次脚本）。
-需要 `adb`：`winget install --id Google.PlatformTools -e`。
-
-**B. 真域名 + 免费 DV 证书（最推荐，iPhone 也行）**
-
-1. 随便一个域名（几十块一年），加一条 A 记录：
-   `sayit.你的域名.com` → 电脑的内网 IP（例如 192.168.3.8），**不需要公网 IP**。
-2. 在云厂商申请免费 DV 证书（DNS 验证，只需证明域名归你），下载 nginx 格式。
-3. 放进 `certs/`，启动时指定：
-
-```bat
-python tools\serve.py --cert certs\sayit.pem --key certs\sayit.key --domain sayit.你的域名.com
-```
-
-手机打开 `https://sayit.你的域名.com:8787` —— 真证书，直接受信任，不用装 CA、不用点「继续前往」，
-而且完全走局域网，断网也能用。证书一年一续（或 acme.sh `--dns` 自动续）。
-
-**C. 临时隧道（给 iPhone 临时试一下）**
-
-```bat
-run.bat
-tools\tunnel.bat          :: 打印 https://xxx.trycloudflare.com
-```
-免注册、真证书、手机什么都不用装，4G 也能访问。但实时语音要绕到国外边缘节点，
-延迟明显变高，长期练口语不建议。
-
-进去后"添加到主屏幕"就是全屏 PWA。
+> 手机访问、局域网调试、线上部署统一走 nginx + 真证书，见 [`DEPLOY.md`](DEPLOY.md)。
+> 应用本身只监听 `127.0.0.1:8787`，不再需要本地自签证书。
 
 ---
 
@@ -302,8 +228,9 @@ SayIt/
 │  ├─ stage0_test.py       命令行验证：送一段 wav，收回 AI 语音，打印延迟
 │  ├─ gen_greetings.py     预生成开场白
 │  └─ make_test_audio.ps1  生成测试音频
-├─ data/                   settings.json / sayit.db / greetings/（都在 .gitignore 里）
-└─ run.bat / run_https.bat
+├─ data/                    settings.json / users.csv / sayit.db / greetings/（都在 .gitignore 里）
+├─ log/                     sayit.log 运行日志（轮转，不进 Git）
+└─ run.bat
 ```
 
 ---

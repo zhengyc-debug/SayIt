@@ -378,15 +378,8 @@
     ws.onopen = ((orig) => () => { wsOpened = true; orig(); })(ws.onopen);
 
     ws.onerror = () => {
-      const isHttps = location.protocol === 'https:';
-      const hint = isHttps
-        ? `WebSocket 连接失败。如果你是用<b>手机 + 自签证书</b>访问的：<br>` +
-          `浏览器会拒绝为「不受信任的证书」建立 WebSocket（页面能点"继续前往"，WebSocket 没有这个按钮）。<br>` +
-          `解决：在手机浏览器里打开 <a href="/ca.cer" style="color:#6ea8fe">${location.origin}/ca.cer</a> ` +
-          `安装证书后再刷新本页。`
-        : '连接服务端失败，检查服务是否还在跑。';
       setStatus(`<span class="err">${T('连接失败')}</span>`);
-      el.toast.innerHTML = hint;
+      el.toast.innerHTML = '连接服务端失败，检查服务是否还在跑、网络是否正常。若刚重启过服务，刷新页面重新登录。';
       el.toast.className = 'toast show err';
       el.toast.style.pointerEvents = 'auto';
       clearTimeout(toast._t);
@@ -395,6 +388,11 @@
 
     ws.onclose = (ev) => {
       if (!wsOpened) {
+        // 4401 = 服务端判定未登录（cookie 过期或换了 SECRET_KEY）
+        if (ev.code === 4401) {
+          location.replace('/login?next=' + encodeURIComponent(location.pathname));
+          return;
+        }
         // 从没 open 过 = 握手就没成，把 code 打出来方便定位
         setStatus(`<span class="err">连不上服务（close code ${ev.code}）</span>`);
         if (S.inCall) endCall(false);

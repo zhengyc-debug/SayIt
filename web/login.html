@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b12" />
+<meta name="robots" content="noindex" />
+<title>SayIt · 登录</title>
+<link rel="icon" href="/static/icon.svg" />
+<link rel="stylesheet" href="/static/styles.css" />
+<style>
+  /* 登录页不挂底部标签栏，改成垂直居中的单卡片布局 */
+  .login-wrap {
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 20px calc(24px + env(safe-area-inset-bottom));
+  }
+  .login-box { width: 100%; max-width: 360px; }
+  .login-box .wordmark { margin-bottom: 6px; }
+  .login-box .sub { margin: 0 0 18px; }
+  .login-box .btn.primary { width: 100%; margin-top: 4px; }
+  .login-box .err { min-height: 18px; margin-top: 10px; font-size: 13px; color: #ffb3b3; }
+  .login-foot { margin-top: 16px; font-size: 11.5px; color: var(--fg-3); text-align: center; }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-box">
+    <div class="wordmark">Say<span>It</span><i class="dot"></i></div>
+    <p class="sub">私人使用，请先登录。</p>
+
+    <form class="card" id="login-form" autocomplete="on">
+      <div class="grid" style="grid-template-columns:1fr;margin-top:0">
+        <label class="field">用户名
+          <input id="username" name="username" autocomplete="username"
+                 autocapitalize="off" autocorrect="off" spellcheck="false" required />
+        </label>
+        <label class="field">密码
+          <input id="password" name="password" type="password"
+                 autocomplete="current-password" required />
+        </label>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-login" type="submit">登录</button>
+      </div>
+      <div class="err" id="err"></div>
+    </form>
+
+    <div class="login-foot">账号由服务端的 data/users.csv 提供</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const form = document.getElementById('login-form');
+  const errEl = document.getElementById('err');
+  const btn = document.getElementById('btn-login');
+  const nextParam = new URLSearchParams(location.search).get('next') || '/';
+
+  // 只在站内跳转，挡掉 ?next=https://evil.com 这类开放重定向
+  const safeNext = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/';
+
+  async function submit(username, password) {
+    errEl.textContent = '';
+    btn.disabled = true;
+    btn.textContent = '登录中…';
+    try {
+      const r = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, next: safeNext }),
+      });
+      if (r.status === 429) {
+        const d = await r.json().catch(() => ({}));
+        errEl.textContent = d.message || '尝试次数过多，请稍后再试';
+        return;
+      }
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) {
+        location.replace(safeNext);
+        return;
+      }
+      errEl.textContent = d.message || '登录失败';
+      document.getElementById('password').select();
+    } catch (e) {
+      errEl.textContent = '连不上服务端：' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '登录';
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submit(document.getElementById('username').value,
+           document.getElementById('password').value);
+  });
+
+  document.getElementById('username').focus();
+})();
+</script>
+</body>
+</html>
