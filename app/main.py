@@ -730,7 +730,31 @@ async def manifest() -> FileResponse:
                         media_type="application/manifest+json")
 
 
-app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+# 静态资源白名单：只放行登录页和公共页面真正需要的文件。
+# 不能直接把整个 web/ 挂上去 —— 那样 /static/settings.html、/static/settings.js
+# 这些本该登录后才能看的文件会绕过登录门禁（/static/ 在公开前缀里）。
+# 用「文件名白名单」而不是「后缀白名单」：settings.js 也是 .js，
+# 但只有登录后的设置页才用它，不该公开。
+PUBLIC_STATIC = {
+    "styles.css",        # 所有页面（含登录页）的样式
+    "i18n.js",           # 登录页和全站都用
+    "nav.js",            # 底部标签栏（登录页会提前 return，但加载无害）
+    "app.js",            # 通话页逻辑
+    "audio-worklet.js",  # AudioWorklet，必须固定路径
+    "icon.svg",          # favicon / PWA 图标
+}
+
+
+@app.get("/static/{filename:path}", include_in_schema=False)
+async def static_file(filename: str) -> FileResponse:
+    # 只认平铺文件名，带斜杠或 .. 一律 404（防穿越）
+    if filename not in PUBLIC_STATIC:
+        raise HTTPException(404)
+    target = (WEB_DIR / filename).resolve()
+    if not target.is_file():
+        raise HTTPException(404)
+    return FileResponse(target)
+
 
 # 开场白音频（模型自己念的录音）
 GREET_DIR.mkdir(parents=True, exist_ok=True)

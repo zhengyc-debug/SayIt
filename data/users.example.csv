@@ -5,4 +5,4 @@ username,password,display_name
 #   哈希（推荐，文件泄露也看不到明文）：
 #           先用  python -m app.auth hash 你的密码  生成，再粘到第二列
 # 账号改动即时生效，不用重启；把某人从文件里删掉，他的登录态立即失效。
-admin,change-me-please,郑昱川
+admin,你的密码,郑昱川

@@ -10,7 +10,8 @@
 
 ```bash
 cd E:\SayIt
-run.bat              # 本机开发：http://127.0.0.1:8787
+run.bat              # Windows：本机开发 http://127.0.0.1:8787
+./run.sh             # Linux / macOS / git-bash 同上
 ```
 
 线上部署（nginx + systemd + 真证书）见 [`DEPLOY.md`](DEPLOY.md)。
@@ -23,7 +24,7 @@ run.bat              # 本机开发：http://127.0.0.1:8787
 
 ```csv
 username,password,display_name
-admin,change-me-please,郑昱川
+admin,你的密码,郑昱川
 ```
 
 - 密码可以直接写明文，也可以写 `pbkdf2_sha256` 哈希：
@@ -34,6 +35,20 @@ admin,change-me-please,郑昱川
 - cookie 签名用 `.env` 的 `SECRET_KEY`，不填会随机生成 —— 代价是每次重启都要重新登录
 - 同一 IP 5 分钟内错 8 次，锁定 5 分钟
 - 退出入口在「我的」页底部
+
+**鉴权覆盖面**（`app/main.py` 的 `require_login` 中间件 + `/ws/call` 单独判定）：
+
+| 范围 | 未登录时的响应 |
+|---|---|
+| 所有 `/api/*`（含 `/api/health`、`/api/settings/test`、`/api/llm/test`） | `401` |
+| 所有页面（`/`、`/settings`、`/history`、`/stats`、`/me`）及 `/sw.js`、`/manifest.webmanifest` | `303` 跳 `/login?next=...` |
+| `/ws/call` | 握手直接拒绝，close code `4401` |
+| `/greetings/*`（开场白音频） | `303` 跳登录 |
+| `/static/*` | **按文件名白名单公开**，只有 `styles.css` `app.js` `i18n.js` `nav.js` `audio-worklet.js` `icon.svg` |
+| `/login`、`/api/login`、`/api/auth-state` | 公开（登录本身需要） |
+
+`/static` 用的是**文件名白名单**而不是后缀白名单：`settings.js` 也是 `.js`，但只有登录后的设置页才用，
+不该公开。HTML 一律走显式路由（受登录保护），`/static/*.html` 一律 404。
 
 `data/users.csv` 已在 `.gitignore` 里，不进 Git。格式参考 `data/users.example.csv`。
 
@@ -230,7 +245,7 @@ SayIt/
 │  └─ make_test_audio.ps1  生成测试音频
 ├─ data/                    settings.json / users.csv / sayit.db / greetings/（都在 .gitignore 里）
 ├─ log/                     sayit.log 运行日志（轮转，不进 Git）
-└─ run.bat
+└─ run.bat / run.sh
 ```
 
 ---
