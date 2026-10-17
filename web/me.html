@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b12" />
+<title>SayIt · 我的</title>
+<link rel="icon" href="/static/icon.svg" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <div class="grow">
+      <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
+      <h1 style="margin-top:6px">我的</h1>
+    </div>
+    <div id="lang-host"></div>
+  </div>
+
+  <h2>你的画像 <small>自动算的，每次通话前会告诉 AI</small></h2>
+  <div class="card" id="profile"><div class="empty">加载中…</div></div>
+
+  <h2>关于你自己</h2>
+  <p class="sub">写点 AI 推不出来的事，比如「我下周有个英语面试」。这句会直接影响它怎么跟你聊。</p>
+  <div class="card">
+    <textarea id="notes" rows="3" placeholder="例如：我在西安找工作，目标是测试开发岗位，下周三有一场英文面试。"
+      style="font-size:14px;line-height:1.6;resize:vertical"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="save">保存</button>
+      <span class="hint" id="hint2"></span>
+    </div>
+  </div>
+
+  <h2>更多</h2>
+  <div class="card tight">
+    <a class="sess" href="/settings" style="margin:0;border:none;background:transparent;padding:10px 0">
+      <div class="meta"><div class="t1">模型与语音设置</div>
+        <div class="t2">换供应商 / 音色 / 复盘用的文本模型</div></div>
+      <div class="arr">›</div>
+    </a>
+  </div>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/nav.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const T = (s, v) => (window.I18N ? I18N.t(s, v) : s);
+const TYPE = { grammar: '语法', tense: '时态', word: '用词', order: '语序', pronunciation: '发音' };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function load() {
+  const p = await (await fetch('/api/profile')).json();
+  const types = Object.entries(p.error_types || {})
+    .map(([t, n]) => `<span class="type-badge" style="margin:0">${T(TYPE[t] || t)} ×${n}</span>`).join(' ')
+    || '<span style="color:var(--fg-3);font-size:13px">还不够数据</span>';
+  const topics = (p.recent_topics || [])
+    .map(t => `<span class="type-badge" style="margin:0">${esc(t)}</span>`).join(' ')
+    || '<span style="color:var(--fg-3);font-size:13px">还没积累</span>';
+  const lv = p.est_level
+    ? `${p.est_level}${p.target_level && p.target_level !== p.est_level
+        ? ` <span style="font-size:11.5px;color:var(--fg-3);font-weight:400">目标 ${p.target_level}</span>` : ''}`
+    : '<span style="font-size:14px;color:var(--fg-3);font-weight:400">打几通后评估</span>';
+
+  $('profile').innerHTML = `
+    <div class="profile-grid">
+      <div><div class="k">实测水平</div><div class="v big">${lv}</div></div>
+      <div><div class="k">累计通话</div><div class="v big">${p.sessions || 0}<small style="font-size:11.5px;color:var(--fg-3);font-weight:400"> ${T('次')} · ${p.minutes || 0} ${T('分')}</small></div></div>
+      <div><div class="k">复盘报告</div><div class="v big">${p.reports || 0}</div></div>
+    </div>
+    <div style="margin-top:18px">
+      <div class="k" style="font-size:11.5px;color:var(--fg-3)">最近常犯</div>
+      <div class="tags">${types}</div>
+    </div>
+    <div style="margin-top:14px">
+      <div class="k" style="font-size:11.5px;color:var(--fg-3)">最近聊过</div>
+      <div class="tags">${topics}</div>
+    </div>
+    ${p.last_focus ? `<div class="rp-sec-title">上次留下的重点</div>
+      <div class="focus-box">${esc(p.last_focus)}</div>` : ''}`;
+  $('notes').value = p.notes || '';
+  if (window.I18N) I18N.apply($('profile'));
+}
+
+$('save').onclick = async () => {
+  await fetch('/api/profile', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes: $('notes').value }),
+  });
+  $('hint2').textContent = T('已保存，下一通电话生效');
+  setTimeout(() => { $('hint2').textContent = ''; }, 3000);
+};
+
+if (window.I18N) I18N.mountSwitch($('lang-host'));
+
+load().catch(e => {
+  $('profile').innerHTML = `<div class="empty" style="color:#ffb3b3">加载失败：${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b12" />
+<title>SayIt · 通话记录</title>
+<link rel="icon" href="/static/icon.svg" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <div class="grow">
+      <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
+      <h1 style="margin-top:6px">通话记录</h1>
+    </div>
+    <div id="lang-host"></div>
+  </div>
+
+  <div id="list"><div class="empty">加载中…</div></div>
+  <div class="pager" id="pager" style="display:none">
+    <button class="btn sm" id="pg-prev">上一页</button>
+    <div class="pages" id="pg-info"></div>
+    <button class="btn sm" id="pg-next">下一页</button>
+  </div>
+</div>
+
+<!-- 详情用弹层：不再把列表顶下去，点哪条留在哪条 -->
+<div class="modal" id="detail-modal" aria-hidden="true">
+  <div class="modal-card wide">
+    <div class="modal-head">
+      <div>
+        <h3 id="d-title">通话详情</h3>
+        <div class="sub" id="d-sub"></div>
+      </div>
+      <button class="icon-btn" id="d-close" title="关闭">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="turn-list" id="d-turns"></div>
+      <div id="rp-host"></div>
+    </div>
+    <div class="modal-foot">
+      <a class="btn" id="d-again" href="/">再练一次</a>
+      <button class="btn primary" id="d-close2">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/nav.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const T = (s, v) => (window.I18N ? I18N.t(s, v) : s);
+const TYPE = { grammar: '语法', tense: '时态', word: '用词', order: '语序', pronunciation: '发音' };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const locale = () => (window.I18N && I18N.lang === 'en' ? 'en-US' : 'zh-CN');
+const fmt = (ts) => new Date(ts * 1000).toLocaleString(locale(), {
+  month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+const dur = (ms) => {
+  const s = Math.round((ms || 0) / 1000);
+  if (s >= 60) return T('{a} 分 {b} 秒', { a: Math.floor(s / 60), b: s % 60 });
+  return T('{a} 秒', { a: s });
+};
+const uiLang = () => (window.I18N ? I18N.lang : 'zh');
+
+const PAGE = 10;
+let page = 0;
+let total = 0;
+let openId = null;
+
+// ------------------------------------------------------------------ 复盘
+function renderReport(rep) {
+  if (!rep) return '';
+  const sc = rep.score || {};
+  const errs = (rep.errors || []).map(e => `
+    <div class="err-item">
+      <div class="err-line"><span class="tag">${T('你说')}</span>
+        <span class="err-said">${esc(e.you_said)}</span>
+        <span class="type-badge">${T(TYPE[e.type] || e.type)}</span></div>
+      <div class="err-line"><span class="tag">${T('地道')}</span>
+        <span class="err-better">${esc(e.better)}</span></div>
+      ${e.why ? `<div class="err-why">${esc(e.why)}</div>` : ''}
+    </div>`).join('') ||
+    `<p class="hint" style="color:var(--ok)">${T('这通没挑出明显错误。')}</p>`;
+  const words = (rep.new_words || []).map(w =>
+    `<span class="word-chip">${esc(w.word)}<span>${esc(w.meaning)}</span></span>`).join('');
+  return `
+    <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--line)">
+      <div class="scores" style="margin-bottom:14px">
+        ${[T('语法'), T('流利'), T('词汇')].map((k, i) => {
+          const v = [sc.grammar, sc.fluency, sc.vocabulary][i] || 0;
+          return `<div class="score"><div class="k">${k}</div>
+            <div class="v">${v}<span>/10</span></div>
+            <div class="bar"><i style="width:${v * 10}%"></i></div></div>`;
+        }).join('')}
+      </div>
+      ${rep.overall ? `<p class="rp-overall">${esc(rep.overall)}</p>` : ''}
+      <div class="rp-sec-title">${T('可以更地道的地方')}</div>${errs}
+      ${words ? `<div class="rp-sec-title">${T('顺手记住')}</div><div class="words">${words}</div>` : ''}
+      ${rep.next_focus ? `<div class="rp-sec-title">${T('下一通的重点')}</div>
+        <div class="focus-box">${esc(rep.next_focus)}</div>` : ''}
+    </div>`;
+}
+
+function enhance(host) { if (window.I18N) I18N.apply(host); }
+
+async function loadReportInto(id, host) {
+  const g = await (await fetch(`/api/sessions/${id}/report?ui_lang=${uiLang()}`)).json();
+  if (g.status === 'ready') { host.insertAdjacentHTML('beforeend', renderReport(g.report)); return; }
+  if (g.status === 'no_speech') {
+    host.insertAdjacentHTML('beforeend',
+      `<p class="hint" style="margin-top:16px">${T('这通没有识别到你的语音，无法复盘。')}</p>`);
+    return;
+  }
+  const b = document.createElement('button');
+  b.className = 'btn';
+  b.textContent = T('生成复盘（约 15 秒）');
+  b.style.marginTop = '16px';
+  b.onclick = async () => {
+    b.disabled = true; b.textContent = T('生成中…');
+    const r = await (await fetch(`/api/sessions/${id}/report`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ui_lang: uiLang() }) })).json();
+    b.remove();
+    if (r.ok) { host.insertAdjacentHTML('beforeend', renderReport(r.report)); }
+    else host.insertAdjacentHTML('beforeend',
+      `<p class="hint" style="color:#ffb3b3;margin-top:12px">${esc(r.message || T('生成失败'))}</p>`);
+  };
+  host.appendChild(b);
+}
+
+// ------------------------------------------------------------------ 详情（弹层）
+async function loadDetail(id) {
+  openId = id;
+  const modal = $('detail-modal');
+  $('d-title').textContent = T('通话详情');
+  $('d-sub').textContent = T('加载中…');
+  $('d-turns').innerHTML = '';
+  $('rp-host').innerHTML = '<div class="rp-loading"><span class="spinner"></span></div>';
+  modal.classList.add('open');
+
+  const d = await (await fetch('/api/sessions/' + id)).json();
+  $('d-sub').textContent =
+    `${fmt(d.started_at)} · ${T(SCEN_LABEL(d.scenario))} · ${d.level || ''} · ` +
+    `${T('{n} 句', { n: d.turn_count || 0 })} · ${dur(d.duration_ms)}`;
+
+  const turns = (d.turns || []).map(t => `
+    <div class="turn ${t.role === 'user' ? 'user' : 'assistant'}">
+      <span class="who">${t.role === 'user' ? T('你') : 'ai'}</span>
+      ${esc(t.text)}
+    </div>`).join('') || `<p class="hint">${T('这通电话没有留下文本。')}</p>`;
+  $('d-turns').innerHTML = turns;
+
+  $('d-again').href = `/?scenario=${encodeURIComponent(d.scenario || '')}` +
+    `&level=${encodeURIComponent(d.level || '')}` +
+    `&language=${encodeURIComponent(d.language || '')}`;
+
+  $('rp-host').innerHTML = '';
+  loadReportInto(id, $('rp-host'))
+    .then(() => enhance(modal))
+    .catch(() => { $('rp-host').innerHTML = ''; });
+  enhance(modal);
+}
+
+function closeDetail() {
+  $('detail-modal').classList.remove('open');
+  openId = null;
+  document.querySelectorAll('.sess').forEach(n => n.classList.remove('on'));
+  if (location.search) history.replaceState({}, '', '/history');
+}
+
+// 场景名：中文用 label_zh，英文用 label（后端 bootstrap 同时给了两个）
+let SCEN = { free_talk: '日常闲聊', cafe: '咖啡店点单', interview: '面试问答', ielts_p1: '雅思 Part 1' };
+let SCEN_EN = { free_talk: 'Free talk', cafe: 'At the café', interview: 'Job interview', ielts_p1: 'IELTS Part 1' };
+function SCEN_LABEL(id) {
+  if (!id) return '';
+  return uiLang() === 'en' ? (SCEN_EN[id] || SCEN[id] || id) : (SCEN[id] || id);
+}
+
+// ------------------------------------------------------------------ 列表 + 分页
+async function loadList() {
+  const g = await (await fetch(`/api/sessions?limit=${PAGE}&offset=${page * PAGE}`)).json();
+  const sessions = g.sessions || [];
+  total = g.total || 0;
+  // 页码越界（删过数据或刚进页面）时回退一页
+  if (!sessions.length && page > 0) { page = Math.max(0, Math.ceil(total / PAGE) - 1); return loadList(); }
+
+  if (!total) {
+    $('list').innerHTML =
+      `<div class="empty">${T('还没有通话记录。')}<br>${T('去「通话」页打第一通吧。')}</div>`;
+    $('pager').style.display = 'none';
+    return;
+  }
+
+  $('list').innerHTML = sessions.map(s => `
+    <div class="sess ${s.id === openId ? 'on' : ''}" data-id="${s.id}">
+      <div class="meta">
+        <div class="t1">${fmt(s.started_at)} · ${T(SCEN_LABEL(s.scenario))}</div>
+        <div class="t2">${s.level || ''} · ${T('{n} 轮', { n: s.turns || 0 })} · ${dur(s.duration_ms)}</div>
+      </div>
+      <div class="arr">›</div>
+    </div>`).join('');
+  enhance($('list'));
+
+  $('list').querySelectorAll('.sess').forEach(n =>
+    n.onclick = () => { loadDetail(n.dataset.id).catch(() => {}); });
+
+  const pages = Math.max(1, Math.ceil(total / PAGE));
+  $('pager').style.display = pages > 1 ? 'flex' : 'none';
+  $('pg-info').textContent = T('第 {n} / {m} 页 · 共 {t} 通',
+    { n: page + 1, m: pages, t: total });
+  $('pg-prev').disabled = page === 0;
+  $('pg-next').disabled = page >= pages - 1;
+}
+
+$('pg-prev').onclick = () => { if (page > 0) { page--; loadList(); window.scrollTo({ top: 0 }); } };
+$('pg-next').onclick = () => {
+  if ((page + 1) * PAGE < total) { page++; loadList(); window.scrollTo({ top: 0 }); }
+};
+
+$('d-close').onclick = closeDetail;
+$('d-close2').onclick = closeDetail;
+$('detail-modal').addEventListener('click', (e) => {
+  if (e.target === $('detail-modal')) closeDetail();
+});
+
+if (window.I18N) {
+  I18N.mountSwitch($('lang-host'));
+  // 切语言后：名字、单位、复盘都要跟着变
+  I18N.onChange(() => {
+    loadList().catch(() => {});
+    if (openId) loadDetail(openId).catch(() => {});
+  });
+}
+
+(async () => {
+  // 场景名从 bootstrap 拿，中英两套都存，避免手写漂移
+  try {
+    const b = await (await fetch('/api/bootstrap')).json();
+    const zh = {}, en = {};
+    for (const s of (b.scenarios || [])) { zh[s.id] = s.label_zh || s.label; en[s.id] = s.label || s.label_zh; }
+    SCEN = zh; SCEN_EN = en;
+  } catch (e) { /* 拿不到就用内置那套 */ }
+
+  const id = new URLSearchParams(location.search).get('session');
+  if (id) { loadDetail(id).catch(() => {}); }
+  await loadList();
+})().catch(e => {
+  $('list').innerHTML = `<div class="empty" style="color:#ffb3b3">${T('加载失败：')}${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# secrets
+.env
+data/settings.json
+data/*.db
+data/recordings/
+data/*.db-journal
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# scratch
+tmp/
+*.log
+certs/
+
+# IDE / 本机杂项
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+data/*.db-wal
+data/*.db-shm
+data/*.bak
+
+# 生成开场白时的临时脚本/样本
+data/greetings/_trigger.*

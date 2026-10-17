@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+websockets>=12
+python-dotenv>=1.0
+python-multipart>=0.0.9
+httpx>=0.27          # 复盘用的 OpenAI 兼容客户端
+cryptography>=42     # 自签证书生成（tools/serve.py）

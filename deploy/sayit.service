@@ -1,0 +1,36 @@
+[Unit]
+Description=SayIt voice tutor (uvicorn, 127.0.0.1:8787)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sayit
+Group=sayit
+WorkingDirectory=/opt/sayit
+
+# .env 里的 KEY 会被 python-dotenv 读到；这里再喂一份给 systemd 也无害
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/sayit/.env
+
+# 只监听回环，TLS 交给 nginx
+ExecStart=/opt/sayit/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8787 \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1
+
+Restart=always
+RestartSec=3
+
+# 日志进 journald：journalctl -u sayit -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sayit
+
+# 轻量加固：整机只读，data/ 可写
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/opt/sayit/data
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,110 @@
+{
+  "en__free_talk__en-female-dacey-uranus-bigtts": {
+    "key": "en__free_talk__en-female-dacey-uranus-bigtts",
+    "language": "en",
+    "scenario": "free_talk",
+    "voice": "en_female_dacey_uranus_bigtts",
+    "file": "/greetings/en__free_talk__en-female-dacey-uranus-bigtts.wav",
+    "text": "Hey! Good to hear from you. How's your day going so far?",
+    "duration": 3.38
+  },
+  "en__free_talk__en-male-tim-uranus-bigtts": {
+    "key": "en__free_talk__en-male-tim-uranus-bigtts",
+    "language": "en",
+    "scenario": "free_talk",
+    "voice": "en_male_tim_uranus_bigtts",
+    "file": "/greetings/en__free_talk__en-male-tim-uranus-bigtts.wav",
+    "text": "Hey! Good to hear from you. How's your day going so far?",
+    "duration": 3.79
+  },
+  "en__free_talk__en-female-stokie-uranus-bigtts": {
+    "key": "en__free_talk__en-female-stokie-uranus-bigtts",
+    "language": "en",
+    "scenario": "free_talk",
+    "voice": "en_female_stokie_uranus_bigtts",
+    "file": "/greetings/en__free_talk__en-female-stokie-uranus-bigtts.wav",
+    "text": "Hey! Good to hear from you. How's your day going so far?",
+    "duration": 4.19
+  },
+  "en__cafe__en-female-dacey-uranus-bigtts": {
+    "key": "en__cafe__en-female-dacey-uranus-bigtts",
+    "language": "en",
+    "scenario": "cafe",
+    "voice": "en_female_dacey_uranus_bigtts",
+    "file": "/greetings/en__cafe__en-female-dacey-uranus-bigtts.wav",
+    "text": "",
+    "duration": 7.08
+  },
+  "en__cafe__en-male-tim-uranus-bigtts": {
+    "key": "en__cafe__en-male-tim-uranus-bigtts",
+    "language": "en",
+    "scenario": "cafe",
+    "voice": "en_male_tim_uranus_bigtts",
+    "file": "/greetings/en__cafe__en-male-tim-uranus-bigtts.wav",
+    "text": "",
+    "duration": 5.72
+  },
+  "en__cafe__en-female-stokie-uranus-bigtts": {
+    "key": "en__cafe__en-female-stokie-uranus-bigtts",
+    "language": "en",
+    "scenario": "cafe",
+    "voice": "en_female_stokie_uranus_bigtts",
+    "file": "/greetings/en__cafe__en-female-stokie-uranus-bigtts.wav",
+    "text": "",
+    "duration": 5.93
+  },
+  "en__interview__en-female-dacey-uranus-bigtts": {
+    "key": "en__interview__en-female-dacey-uranus-bigtts",
+    "language": "en",
+    "scenario": "interview",
+    "voice": "en_female_dacey_uranus_bigtts",
+    "file": "/greetings/en__interview__en-female-dacey-uranus-bigtts.wav",
+    "text": "Thanks for making the time today. To start off, could you tell me a bit about yourself?",
+    "duration": 4.57
+  },
+  "en__interview__en-male-tim-uranus-bigtts": {
+    "key": "en__interview__en-male-tim-uranus-bigtts",
+    "language": "en",
+    "scenario": "interview",
+    "voice": "en_male_tim_uranus_bigtts",
+    "file": "/greetings/en__interview__en-male-tim-uranus-bigtts.wav",
+    "text": "Thanks for making the time today. To start off, could you tell me a bit about yourself?",
+    "duration": 4.38
+  },
+  "en__interview__en-female-stokie-uranus-bigtts": {
+    "key": "en__interview__en-female-stokie-uranus-bigtts",
+    "language": "en",
+    "scenario": "interview",
+    "voice": "en_female_stokie_uranus_bigtts",
+    "file": "/greetings/en__interview__en-female-stokie-uranus-bigtts.wav",
+    "text": "Thanks for making the time today. To start off, could you tell me a bit about yourself?",
+    "duration": 5.0
+  },
+  "en__ielts_p1__en-female-dacey-uranus-bigtts": {
+    "key": "en__ielts_p1__en-female-dacey-uranus-bigtts",
+    "language": "en",
+    "scenario": "ielts_p1",
+    "voice": "en_female_dacey_uranus_bigtts",
+    "file": "/greetings/en__ielts_p1__en-female-dacey-uranus-bigtts.wav",
+    "text": "Let's begin. Where are you from, and what do you like about living there?",
+    "duration": 4.01
+  },
+  "en__ielts_p1__en-male-tim-uranus-bigtts": {
+    "key": "en__ielts_p1__en-male-tim-uranus-bigtts",
+    "language": "en",
+    "scenario": "ielts_p1",
+    "voice": "en_male_tim_uranus_bigtts",
+    "file": "/greetings/en__ielts_p1__en-male-tim-uranus-bigtts.wav",
+    "text": "Let's begin. Where are you from, and what do you like about living there?",
+    "duration": 3.97
+  },
+  "en__ielts_p1__en-female-stokie-uranus-bigtts": {
+    "key": "en__ielts_p1__en-female-stokie-uranus-bigtts",
+    "language": "en",
+    "scenario": "ielts_p1",
+    "voice": "en_female_stokie_uranus_bigtts",
+    "file": "/greetings/en__ielts_p1__en-female-stokie-uranus-bigtts.wav",
+    "text": "Let's begin. Where are you from, and what do you like about living there?",
+    "duration": 4.01
+  }
+}

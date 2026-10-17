@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b12" />
+<title>SayIt · 错题本</title>
+<link rel="icon" href="/static/icon.svg" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <div class="grow">
+      <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
+      <h1 style="margin-top:6px">错题本</h1>
+    </div>
+    <div id="lang-host"></div>
+  </div>
+
+  <div class="nums" id="nums"></div>
+
+  <h2>错误类型分布 <small>全部</small></h2>
+  <div class="card" id="typedist"><div class="empty">加载中…</div></div>
+
+  <h2>你说错过的句子 <small id="cnt"></small></h2>
+  <p class="sub">下次通话时，AI 会自然地把这些场景再造一遍，让你把正确的说法真正用出去。</p>
+  <div class="card" id="mistakes"></div>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/nav.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const T = (s, v) => (window.I18N ? I18N.t(s, v) : s);
+const TYPE = { grammar: '语法', tense: '时态', word: '用词', order: '语序', pronunciation: '发音' };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+(async () => {
+  const [st, er] = await Promise.all([
+    (await fetch('/api/stats')).json(),
+    (await fetch('/api/errors?limit=80')).json(),
+  ]);
+
+  const mins = Math.round((st.duration_ms || 0) / 60000);
+  $('nums').innerHTML = [
+    ['通话次数', st.sessions || 0],
+    ['累计时长', `${mins}<small>${mins >= 60 ? '分' : '分'}</small>`],
+    ['复盘报告', st.reports || 0],
+    ['累计错误', (er.errors || []).length],
+  ].map(([k, v]) => `<div class="num"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+
+  const counts = {};
+  for (const e of (er.errors || [])) counts[e.type] = (counts[e.type] || 0) + 1;
+  const types = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...types.map(t => t[1]));
+  $('typedist').innerHTML = types.length
+    ? `<div style="display:flex;flex-direction:column;gap:10px">` + types.map(([t, n]) => `
+        <div class="typerow">
+          <span>${T(TYPE[t] || t)}</span>
+          <span class="bar"><i style="width:${(n / max) * 100}%"></i></span>
+          <span class="n">${n}</span>
+        </div>`).join('') + '</div>'
+    : '<div class="empty">还没有错误记录，打完一通电话并生成复盘后会出现。</div>';
+
+  const list = er.errors || [];
+  $('cnt').textContent = list.length ? T('{n} 条', { n: list.length }) : '';
+  $('mistakes').innerHTML = list.length
+    ? list.map(e => `
+        <div class="mistake">
+          <div><span class="said">${esc(e.you_said)}</span>
+               <span style="color:var(--fg-3)">→</span>
+               <span class="better">${esc(e.better)}</span>
+               <span class="type-badge">${T(TYPE[e.type] || e.type)}</span></div>
+          ${e.why ? `<div class="why">${esc(e.why)}</div>` : ''}
+        </div>`).join('')
+    : '<div class="empty">错题本是空的。</div>';
+  if (window.I18N) { I18N.apply(document.body); I18N.mountSwitch($('lang-host')); }
+})().catch(e => {
+  $('mistakes').innerHTML = `<div class="empty" style="color:#ffb3b3">加载失败：${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>

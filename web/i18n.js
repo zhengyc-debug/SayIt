@@ -1,0 +1,315 @@
+/* SayIt · 界面语言（母语）切换
+ *
+ * 两个语言概念要分清，别混：
+ *   1. 练习语言 —— 通话页「语言」那一排（en / ja …），存在服务端 settings，决定 AI 说什么。
+ *   2. 界面语言 —— 这里的 ui_lang（zh / en），是"我的母语"，决定页面文案和复盘解释用什么语言。
+ *
+ * 实现取巧但可靠：以中文原文为 key 做替换。HTML 不用埋一堆 key，
+ * 动态渲染出来的片段也能被 apply() 兜住（MutationObserver 自动跟）。
+ * 存了原文，切回中文能原样还原。
+ */
+(() => {
+  const LS_KEY = 'sayit.ui_lang';
+  const SUPPORTED = ['zh', 'en'];
+
+  // 中文原文 → English
+  const EN = {
+    // ---------------- 通用 / 导航 ----------------
+    '通话': 'Call',
+    '记录': 'History',
+    '错题本': 'Mistakes',
+    '我的': 'Me',
+    '设置': 'Settings',
+    '关闭': 'Close',
+    '保存': 'Save',
+    '加载中…': 'Loading…',
+    '加载失败：': 'Failed to load: ',
+
+    // ---------------- 通话页 ----------------
+    'SayIt · 口语陪练': 'SayIt · Speaking practice',
+    '场景': 'Scenario',
+    '语言': 'Language',
+    '待机': 'Idle',
+    '通话中': 'In call',
+    '上次通话': 'Last call',
+    '通话详情': 'Call details',
+    '第 {n} / {m} 页 · 共 {t} 通': 'Page {n} / {m} · {t} calls',
+    '{n} 条': '{n} items',
+    '{n} 句': '{n} lines',
+    '{n} 轮': '{n} turns',
+    '{a} 秒': '{a}s',
+    '{a} 分 {b} 秒': '{a}m {b}s',
+    '{n} 通': '{n} calls',
+    '次': 'calls',
+    '已保存': 'Saved',
+    '刷新': 'Refresh',
+    '● 通话中': '● In call',
+    '正在接通…': 'Connecting…',
+    '拿不到麦克风权限': 'Microphone blocked',
+    '连接失败': 'Connection failed',
+    '已结束': 'Ended',
+    '开始通话': 'Start call',
+    '挂断': 'Hang up',
+    '直接开口说英文，不用按任何键': 'Just start speaking — no button to press',
+    '你一说话，它会立刻停下来听': 'It stops talking as soon as you speak',
+    '挂断后自动生成复盘和错题': 'A review and mistake list appear when you hang up',
+    '点这里看逐句记录和复盘': 'Tap to see the transcript and review',
+    '上次通话': 'Last call',
+    '轮': 'turns',
+    '这通电话复盘': 'Call review',
+    '正在生成…': 'Generating…',
+    '正在分析你的表达…': 'Analysing your speech…',
+    'AI 正在逐句看你的表达，通常 10~20 秒': 'Reading through your lines — usually 10–20 seconds',
+    '看错题本': 'Open mistakes',
+    '再打一通': 'Call again',
+    '估计水平': 'Estimated level',
+    '处可改进': 'things to improve',
+    '可以更地道的地方': 'Where you could sound more natural',
+    '这通没挑出明显错误，继续保持。': 'No obvious mistakes this time — keep it up.',
+    '顺手记住': 'Worth remembering',
+    '下一通的重点': 'Focus for next call',
+    '语法': 'Grammar',
+    '时态': 'Tense',
+    '用词': 'Word choice',
+    '语序': 'Word order',
+    '发音': 'Pronunciation',
+    '流利度': 'Fluency',
+    '流利': 'Fluency',
+    '词汇': 'Vocabulary',
+    '你说': 'You said',
+    '地道': 'Natural',
+    '你': 'You',
+    '出错': 'Something went wrong',
+    '正在分析你的表达…': 'Analysing your speech…',
+    '重新生成': 'Try again',
+    '去错题本看看': 'Go to mistakes',
+
+    // 提示 / toast
+    '浏览器拒绝了麦克风权限，或当前页面不是 https / localhost。':
+      'The browser blocked the microphone, or this page is not served over https / localhost.',
+    '已静音（AI 还会继续说完）': 'Muted (the AI will finish its sentence)',
+    '麦克风已开': 'Microphone on',
+    '还剩 1 分钟，准备收尾': 'One minute left — start wrapping up',
+    '时间到，结束这通电话': "Time's up, ending the call",
+    '读不到 /api/bootstrap，服务端可能没起来：':
+      'Cannot reach /api/bootstrap — the server may be down: ',
+    '加载配置失败': 'Failed to load config',
+    '正在接通…': 'Connecting…',
+
+    // ---------------- 记录页 ----------------
+    'SayIt · 通话记录': 'SayIt · Call history',
+    '通话记录': 'Call history',
+    '句': 'lines',
+    '秒': 's',
+    '这通没挑出明显错误。': 'No obvious mistakes in this call.',
+    '这通没有识别到你的语音，无法复盘。': 'No speech was recognised, so there is nothing to review.',
+    '生成复盘（约 15 秒）': 'Generate review (~15s)',
+    '生成中…': 'Generating…',
+    '生成失败': 'Generation failed',
+    '这通电话没有留下文本。': 'This call left no transcript.',
+    '再练一次': 'Practise again',
+    '返回列表': 'Back to list',
+    '还没有通话记录。': 'No calls yet.',
+    '去「通话」页打第一通吧。': 'Head to the Call tab and make your first one.',
+    '上一页': 'Prev',
+    '下一页': 'Next',
+    '共': 'of',
+    '通': 'calls',
+    '页': '',
+
+    // ---------------- 错题本 ----------------
+    'SayIt · 错题本': 'SayIt · Mistakes',
+    '错误类型分布': 'Mistake types',
+    '全部': 'All',
+    '你说错过的句子': "Sentences you got wrong",
+    '下次通话时，AI 会自然地把这些场景再造一遍，让你把正确的说法真正用出去。':
+      'Next call, the AI recreates these situations so you actually use the correct phrasing.',
+    '通话次数': 'Calls',
+    '累计时长': 'Total time',
+    '复盘报告': 'Reviews',
+    '累计错误': 'Mistakes',
+    '分': 'min',
+    '还没有错误记录，打完一通电话并生成复盘后会出现。':
+      'No mistakes recorded yet — they appear after a call with a generated review.',
+    '错题本是空的。': 'Your mistake list is empty.',
+    '条': 'items',
+
+    // ---------------- 我的 ----------------
+    'SayIt · 我的': 'SayIt · Me',
+    '你的画像': 'Your profile',
+    '自动算的，每次通话前会告诉 AI': 'Computed automatically, fed to the AI before every call',
+    '关于你自己': 'About you',
+    '写点 AI 推不出来的事，比如「我下周有个英语面试」。这句会直接影响它怎么跟你聊。':
+      'Write things the AI cannot infer — e.g. "I have an English interview next week." It directly shapes how it talks to you.',
+    '更多': 'More',
+    '模型与语音设置': 'Models & voice',
+    '换供应商 / 音色 / 复盘用的文本模型': 'Switch provider / voice / the text model used for reviews',
+    '实测水平': 'Measured level',
+    '累计通话': 'Calls',
+    '最近常犯': 'Recent weak spots',
+    '最近聊过': 'Recent topics',
+    '上次留下的重点': 'Last focus',
+    '目标': 'target',
+    '打几通后评估': 'Estimate after a few calls',
+    '还不够数据': 'Not enough data yet',
+    '还没积累': 'Nothing yet',
+    '已保存，下一通电话生效': 'Saved — applies from your next call',
+    '界面语言': 'Interface language',
+    '中文': '中文',
+
+    // ---------------- 设置页 ----------------
+    'SayIt · 设置': 'SayIt · Settings',
+    '默认通话设置': 'Default call settings',
+    '水平（CEFR）': 'Level (CEFR)',
+    '默认场景': 'Default scenario',
+    'AI 名字（留空用默认）': 'AI name (leave empty for default)',
+    '语音模型': 'Voice model',
+    '选中的就是通话时用的模型。换供应商只改这里，代码不用动。':
+      'The selected one is used for calls. Switching providers only touches this screen.',
+    '复盘用文本模型': 'Text model for reviews',
+    '挂断后生成复盘报告用的 LLM，任何 OpenAI 兼容端点都行（DeepSeek / 方舟 / 百炼 / OpenAI）。':
+      'The LLM that writes your review after a call. Any OpenAI-compatible endpoint works.',
+    '文本模型': 'Text model',
+    '模型': 'Model',
+    '启用复盘': 'Enable reviews',
+    '开启': 'On',
+    '关闭': 'Off',
+    '测试文本模型': 'Test text model',
+    '没配 Key 也能正常通话、看字幕、记错题，只是挂断后不出复盘报告。':
+      'Without a key you can still call, read captions and collect mistakes — you just get no review.',
+    '放弃修改': 'Discard changes',
+    'Key 已配置': 'Key set',
+    '未配 Key': 'No key',
+    '未联调': 'Not wired up',
+    '（该语言暂无音色）': '(no voice for this language yet)',
+    '端点（一般不用改）': 'Endpoint (rarely changed)',
+    '粘贴 API Key': 'Paste API key',
+    '测试连接': 'Test connection',
+    '连接中…': 'Connecting…',
+    '请求中…': 'Requesting…',
+    '设置已保存': 'Settings saved',
+    '已恢复为已保存的配置': 'Reverted to the saved settings',
+    '加载失败': 'Failed to load',
+    'registry-hint': 'Languages and scenarios are registry-driven: add a language in <code>app/languages.py</code>, a scenario in <code>app/scenarios.py</code>, and the UI picks it up automatically.',
+    '音色': 'Voice',
+  };
+
+  const ATTRS = ['placeholder', 'title', 'aria-label'];
+
+  function detect() {
+    const saved = localStorage.getItem(LS_KEY);
+    if (SUPPORTED.includes(saved)) return saved;
+    const nav = (navigator.language || '').toLowerCase();
+    return nav.startsWith('zh') ? 'zh' : 'en';
+  }
+
+  let lang = detect();
+  const subs = [];
+
+  /** 取某个中文串在当前界面语言下的写法 */
+  function t(zh, vars) {
+    let out = lang === 'zh' ? zh : (EN[zh] || zh);
+    if (vars) {
+      for (const k of Object.keys(vars)) {
+        out = out.split('{' + k + '}').join(vars[k]);
+      }
+    }
+    return out;
+  }
+
+  const hasCJK = (s) => /[\u4e00-\u9fff]/.test(s);
+
+  /** 把一个子树里的中文文案就地换成当前语言（存原文，可还原） */
+  function apply(root) {
+    root = root || document;
+    if (!root) return;
+    // 带 data-i18n 的整段（含 <code> 这类内联标签）单独替换 innerHTML
+    const blocks = root.querySelectorAll ? root.querySelectorAll('[data-i18n]') : [];
+    for (const el of blocks) {
+      const key = el.getAttribute('data-i18n');
+      if (el.__zhhtml === undefined) el.__zhhtml = el.innerHTML;
+      const want = lang === 'en' ? (EN[key] || el.__zhhtml) : el.__zhhtml;
+      if (el.innerHTML !== want) el.innerHTML = want;   // 只在真的变了才写，避免 MutationObserver 自激
+    }
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    for (const node of nodes) {
+      const p = node.parentElement;
+      if (!p) continue;
+      if (/^(SCRIPT|STYLE|CODE|PRE|TEXTAREA)$/.test(p.tagName)) continue;
+      if (p.closest && p.closest('[data-i18n]')) continue;   // 整段已经换过了，别再逐句替换
+      if (node.__zh === undefined) node.__zh = node.nodeValue;
+      const src = node.__zh;
+      const key = (src || '').trim();
+      if (!key || !hasCJK(key)) continue;
+      node.nodeValue = lang === 'zh' ? src : src.replace(key, EN[key] || key);
+    }
+    const els = root.querySelectorAll ? root.querySelectorAll('[placeholder],[title],[aria-label]') : [];
+    for (const el of els) {
+      for (const a of ATTRS) {
+        if (!el.hasAttribute(a)) continue;
+        const store = '__zh_' + a;
+        if (el[store] === undefined) el[store] = el.getAttribute(a);
+        const src = el[store] || '';
+        const key = src.trim();
+        if (!key || !hasCJK(key)) continue;
+        el.setAttribute(a, lang === 'zh' ? src : src.replace(key, EN[key] || key));
+      }
+    }
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }
+
+  /** 动态内容也会被自动翻译：监听 DOM 变化，防抖后再跑一遍 */
+  let timer = null;
+  function watch() {
+    if (typeof MutationObserver === 'undefined') return;
+    const mo = new MutationObserver(() => {
+      if (lang === 'zh') return;
+      clearTimeout(timer);
+      timer = setTimeout(() => apply(document.body), 40);
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function setLang(l) {
+    if (!SUPPORTED.includes(l)) return;
+    lang = l;
+    localStorage.setItem(LS_KEY, l);
+    apply(document);
+    for (const fn of subs) { try { fn(lang); } catch (e) { } }
+  }
+
+  /** 中 / EN 两段式开关，插到任意容器里 */
+  function mountSwitch(host) {
+    if (!host) return null;
+    const box = document.createElement('div');
+    box.className = 'langswitch';
+    box.innerHTML = `<button type="button" data-l="zh">中文</button><button type="button" data-l="en">EN</button>`;
+    const paint = () => box.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.l === lang));
+    box.querySelectorAll('button').forEach(b => {
+      b.onclick = () => setLang(b.dataset.l);
+    });
+    host.appendChild(box);
+    paint();
+    subs.push(paint);
+    apply(box);
+    return box;
+  }
+
+  window.I18N = {
+    get lang() { return lang; },
+    t, apply, setLang, mountSwitch,
+    onChange(fn) { subs.push(fn); },
+  };
+
+  // 尽早跑一次，避免中文闪一下
+  const boot = () => { apply(document); watch(); };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
