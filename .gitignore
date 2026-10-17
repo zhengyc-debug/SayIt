@@ -16,6 +16,10 @@ tmp/
 *.log
 certs/
 
+# 运行日志（log/sayit.log 及轮转文件）
+log/
+!log/.gitkeep
+
 # IDE / 本机杂项
 .idea/
 .vscode/

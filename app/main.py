@@ -47,6 +47,7 @@ from .config import (
     save_settings,
 )
 from .languages import LANGUAGES, get_language, public_languages, voices_for
+from .logging_setup import setup_logging
 from .prompts import build_instructions, default_name
 from .providers import (
     AudioOut,
@@ -63,11 +64,7 @@ from .providers import (
 from .llm import LLMError, ping as llm_ping
 from .scenarios import public_scenarios
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
-    datefmt="%H:%M:%S",
-)
+setup_logging()
 log = logging.getLogger("sayit")
 
 
