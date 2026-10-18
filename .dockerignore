@@ -1,0 +1,44 @@
+# 构建上下文排除清单
+# 原则：镜像里只放「代码 + 生成好的开场白音频」，不放任何用户数据与密钥。
+
+# ---- 开发环境（Windows 版 venv，绝不能进 Linux 镜像）----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# ---- 密钥与用户数据（运行时由 volume 挂载）----
+.env
+data/sayit.db
+data/sayit.db-*
+data/users/
+data/users.csv
+data/secret.key
+data/settings.json
+data/settings.json.migrated
+data/recordings/
+
+# ---- 日志 ----
+log/
+*.log
+
+# ---- IDE / 本机杂物 ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.git/
+.gitignore
+certs/
+
+# ---- 生成开场白时的临时文件 ----
+data/greetings/_trigger.*
+
+# ---- 文档（省镜像体积；需要时单独 COPY）----
+*.md
+!README.md
+
+# 容器的编排文件不需要进镜像。
+# 注意：不要把 Dockerfile / .dockerignore 写进来 —— 它们是构建输入，
+# 排除掉会导致部分构建环境（CI、BuildKit 缓存复用）读不到。进镜像无妨。
+docker-compose.yml

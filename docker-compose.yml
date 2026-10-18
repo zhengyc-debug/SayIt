@@ -1,0 +1,59 @@
+# SayIt 的 Docker Compose 配置
+#
+#   docker compose up -d --build     # 构建并启动
+#   docker compose logs -f           # 看日志（首次启动的随机密码在这里）
+#   docker compose down              # 停止（数据保留在卷里）
+#
+# 数据全部落在命名卷 sayit-data，删容器不丢数据。
+# 想把数据放在宿主机目录（方便备份/迁移），把 volumes 那两行换成注释里的写法。
+
+services:
+  sayit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sayit:latest
+    container_name: sayit
+    restart: unless-stopped
+
+    ports:
+      # 只绑回环更安全：外面用 nginx 反代 + HTTPS（手机要用麦克风必须 https）。
+      # 想直接局域网访问，改成 "8787:8787"。
+      - "127.0.0.1:8787:8787"
+
+    volumes:
+      # 数据库 / 账号 / 每人配置 / 开场白 / 签名密钥 全在这一个卷里
+      - sayit-data:/app/data
+      # 宿主机目录写法：
+      # - ./data:/app/data
+
+    environment:
+      TZ: Asia/Shanghai
+      LOG_LEVEL: INFO
+      # 首次启动的管理员密码。不填会自动生成随机密码并打印到日志。
+      # SAYIT_ADMIN_PASSWORD: "换成一个你自己的强密码"
+      # 登录 cookie 签名密钥。不填会自动生成并保存到 data/secret.key。
+      # SECRET_KEY: ""
+
+    # 音频是持续的小包，给足文件句柄和网络缓冲
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/auth-state"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sayit-data:
+    name: sayit-data

@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from app.main import app
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 
@@ -36,8 +36,8 @@ def main() -> int:
     print(f"  SayIt  http://{shown}:{args.port}")
     print("=" * 60)
     if args.host in ("0.0.0.0", "::"):
-        print("  已绑定 0.0.0.0：其它机器用 http 访问时浏览器不给麦克风权限。")
-        print("  局域网/线上调试请走 nginx + 真证书（见 DEPLOY.md）。")
+        print("  已绑定 0.0.0.0（容器/局域网场景正常）。")
+        print("  注意：手机要用麦克风必须走 HTTPS —— 在容器前面放 nginx 终结 TLS。")
     print()
 
     import uvicorn

@@ -1,7 +1,18 @@
+# SayIt 运行依赖
+# 安装： pip install -r requirements.txt
+
 fastapi>=0.110
 uvicorn[standard]>=0.27
+
+# 豆包实时语音走 WebSocket
 websockets>=12
+
+# .env 读取（可选配置，不装也能跑）
 python-dotenv>=1.0
-itsdangerous>=2.1     # 登录 cookie 签名（SessionMiddleware 依赖）
+
+# 登录 cookie 签名（Starlette SessionMiddleware 依赖）
+itsdangerous>=2.1
 python-multipart>=0.0.9
-httpx>=0.27          # 复盘用的 OpenAI 兼容客户端
+
+# 复盘用的 OpenAI 兼容客户端
+httpx>=0.27
