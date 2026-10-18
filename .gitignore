@@ -1,6 +1,9 @@
 # secrets
 .env
 data/settings.json
+data/settings.json.migrated
+data/secret.key
+data/users/
 data/users.csv
 data/*.db
 data/recordings/

@@ -224,12 +224,28 @@ python tools/gen_greetings.py --force  # 强制重录（改了 prompt 之后）
 ```
 SayIt/
 ├─ app/
-│  ├─ main.py              FastAPI：配置 API + WebSocket 网关（不含任何供应商代码）
-│  ├─ config.py            配置中心（data/settings.json 优先，.env 兜底）
+│  ├─ main.py              装配层（~130 行）：中间件 + 挂 router，不写具体接口
+│  ├─ paths.py             全局路径常量
+│  ├─ auth.py              登录态 / 密码校验 / 签名密钥
 │  ├─ languages.py         ★ 语言注册表
 │  ├─ scenarios.py         ★ 场景注册表
 │  ├─ prompts.py           system prompt 组装（教学法规则在这里改）
-│  ├─ db.py                SQLite：sessions + turns
+│  ├─ routers/             ★ 接口按模块拆分
+│  │  ├─ deps.py           取当前用户的依赖（所有路由共用）
+│  │  ├─ auth_routes.py    登录 / 登出 / healthcheck
+│  │  ├─ settings_routes.py 设置 + 供应商 + 测试连接
+│  │  ├─ call_routes.py    通话 WebSocket + 开场白
+│  │  ├─ history_routes.py 通话记录 + 复盘报告
+│  │  ├─ stats_routes.py   错题本 / 统计 / 文本模型测试
+│  │  ├─ me_routes.py      我的（画像）
+│  │  └─ pages_routes.py   页面与静态资源
+│  ├─ services/            ★ 大模型相关
+│  │  ├─ llm.py            OpenAI 兼容客户端
+│  │  ├─ review.py         复盘生成
+│  │  └─ profile.py        画像 / 长期记忆
+│  ├─ store/               ★ 持久化
+│  │  ├─ settings.py       每用户配置（data/users/<name>/settings.json）
+│  │  └─ db.py             SQLite（所有表带 user 列）
 │  └─ providers/
 │     ├─ base.py           ★ 供应商抽象层（7 种事件 + 5 个方法）
 │     ├─ doubao.py         豆包 3.0 全双工（已实测）
@@ -240,21 +256,32 @@ SayIt/
 │  ├─ settings.html settings.js            设置页
 │  └─ history.html                         通话记录
 ├─ tools/
-│  ├─ stage0_test.py       命令行验证：送一段 wav，收回 AI 语音，打印延迟
-│  ├─ gen_greetings.py     预生成开场白
-│  └─ make_test_audio.ps1  生成测试音频
-├─ data/                    settings.json / users.csv / sayit.db / greetings/（都在 .gitignore 里）
+│  └─ gen_greetings.py     预生成开场白
+├─ data/                    sayit.db / users.csv / greetings/ / secret.key
+│  └─ users/<用户名>/settings.json          每个账号自己的配置与 API Key
 ├─ log/                     sayit.log 运行日志（轮转，不进 Git）
-└─ run.bat / run.sh
+└─ run.sh
 ```
+
+### 6.1 为什么这样分
+
+- **接口按页面/功能归组**：改「我的」页只动 `me_routes.py`，不用在一个 800 行的文件里翻。
+  `main.py` 只负责装配，读一遍就知道整个服务由哪几块组成。
+- **大模型调用单独放 `services/`**：换模型、调 prompt、加缓存都在这层，路由不碰。
+- **配置按用户隔离**：`data/users/<用户名>/settings.json`，API Key 只属于配它的账号。
+  数据库所有表都有 `user` 列，越权读别人的通话直接 404。
+- **不需要 .env 填 Key**：`.env` 只留 `LOG_LEVEL`（可选），
+  `SECRET_KEY` 不填会自动生成并落盘到 `data/secret.key`，重启不掉登录。
+- **静态资源用白名单**：`/static/` 是免登录前缀，所以只放登录页真正需要的文件；
+  设置页脚本走受保护的 `/settings.js`。
 
 ---
 
 ## 7. 验证命令
 
 ```bash
-# 单条链路（不经过浏览器）
-python tools/stage0_test.py
+# 起服务
+./run.sh
 
 # 实测指标（2026-10 本机）
 #   连接耗时        59 ms

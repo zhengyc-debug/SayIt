@@ -9,7 +9,7 @@
 #   ./run.sh --host 0.0.0.0
 #   ./run.sh --reload         # 改代码自动重启
 #
-# 额外参数原样透传给 tools/main.py。
+# 额外参数原样透传给 main.py。
 set -euo pipefail
 
 cd "$(dirname "$0")"

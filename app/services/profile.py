@@ -15,8 +15,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from . import db
-from .languages import get_language
+from ..store import db
+from ..languages import get_language
 
 TYPE_LABEL_EN = {
     "tense": "verb tense (past vs. present)",
@@ -27,10 +27,10 @@ TYPE_LABEL_EN = {
 }
 
 
-def snapshot(language: str = "en", recent: int = 8) -> dict[str, Any]:
+def snapshot(user: str, language: str = "en", recent: int = 8) -> dict[str, Any]:
     """当前画像。全部字段都是派生值，任何一项缺失都不影响其它项。"""
-    prof_row = db.get_profile_row()
-    reports = db.recent_reports(recent)
+    prof_row = db.get_profile_row(user)
+    reports = db.recent_reports(user, recent)
 
     levels = [r.get("level") for r in reports if r.get("level")]
     est_level = Counter(levels).most_common(1)[0][0] if levels else None
@@ -42,8 +42,8 @@ def snapshot(language: str = "en", recent: int = 8) -> dict[str, Any]:
             if t and t not in topics:
                 topics.append(t)
 
-    err = db.error_type_stats(recent)
-    overview = db.stats_overview()
+    err = db.error_type_stats(user, recent)
+    overview = db.stats_overview(user)
 
     return {
         "display_name": prof_row.get("display_name") or "",
@@ -60,9 +60,9 @@ def snapshot(language: str = "en", recent: int = 8) -> dict[str, Any]:
     }
 
 
-def prompt_hint(language: str, selected_level: str) -> str:
+def prompt_hint(user: str, language: str, selected_level: str) -> str:
     """把画像变成一段注入 system prompt 的指令。没有数据时返回空串。"""
-    s = snapshot(language)
+    s = snapshot(user, language)
     lines: list[str] = []
 
     est, target = s.get("est_level"), (selected_level or "").upper()

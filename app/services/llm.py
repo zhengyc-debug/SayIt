@@ -12,11 +12,18 @@ from typing import Any
 
 import httpx
 
+from ..store import settings as store_settings
+
 log = logging.getLogger("sayit.llm")
 
 
 class LLMError(RuntimeError):
     pass
+
+
+def conf_for(username: str) -> dict[str, Any]:
+    """取某个用户配的文本模型参数。"""
+    return store_settings.load_settings(username).get("llm") or {}
 
 
 async def chat(
@@ -30,7 +37,7 @@ async def chat(
     timeout: float = 90.0,
 ) -> str:
     if not api_key:
-        raise LLMError("没有配置文本模型 API Key（去 /settings 填，或写在 .env 的 DEEPSEEK_API_KEY）")
+        raise LLMError("还没有配置文本模型 API Key —— 请到「设置 → 复盘用文本模型」里填入你自己的 Key")
     base = (base_url or "").rstrip("/")
     if not base:
         raise LLMError("没有配置文本模型 base_url")

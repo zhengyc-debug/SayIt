@@ -4,9 +4,8 @@
 单人自用不需要注册/改密流程。文件每次登录时重新读，改完不用重启服务。
 
 登录态：签名 cookie（Starlette SessionMiddleware 实现）。
-  cookie 里只放 username，签名密钥从 .env 的 SECRET_KEY 读；
-  没配 SECRET_KEY 就随机生成一个，此时重启服务会让已登录的会话失效
-  （只影响体验，不影响安全）。
+  cookie 里只放 username，签名密钥优先读 .env 的 SECRET_KEY，
+  没配就自动生成并保存到 data/secret.key（重启不会掉登录）。
 
 安全取舍（个人项目，够用为止）：
   - 密码支持明文和 pbkdf2_sha256 哈希两种写法，CSV 里想放哈希就放哈希；
@@ -22,14 +21,12 @@ import logging
 import os
 import secrets
 import time
-from pathlib import Path
 
 from fastapi import Request
 
-log = logging.getLogger("sayit.auth")
+from .paths import USERS_CSV, SECRET_PATH
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-USERS_CSV = BASE_DIR / "data" / "users.csv"
+log = logging.getLogger("sayit.auth")
 
 SESSION_KEY = "sayit_user"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30          # 30 天，自用够长，免得反复登录
@@ -45,12 +42,31 @@ _fails: dict[str, list[float]] = {}
 # 签名密钥
 # --------------------------------------------------------------------------
 def session_secret() -> str:
+    """签名密钥优先读 .env 的 SECRET_KEY；没有就落盘一份到 data/secret.key。
+
+    落盘的意义：重启服务不会把所有人踢下线。之前是每次随机生成，
+    一重启就得重新登录 —— 但这不该由用户去 .env 里手动维护。
+    """
     key = (os.environ.get("SECRET_KEY") or "").strip()
     if key:
         return key
-    log.warning("未设置 SECRET_KEY，已随机生成临时密钥："
-                "重启服务后所有人需要重新登录。请在 .env 里设一个固定值。")
-    return secrets.token_urlsafe(48)
+    try:
+        if SECRET_PATH.exists():
+            saved = SECRET_PATH.read_text(encoding="utf-8").strip()
+            if saved:
+                return saved
+        new_key = secrets.token_urlsafe(48)
+        SECRET_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SECRET_PATH.write_text(new_key, encoding="utf-8")
+        try:
+            SECRET_PATH.chmod(0o600)
+        except Exception:
+            pass
+        log.info("已生成登录签名密钥并保存到 %s", SECRET_PATH)
+        return new_key
+    except Exception:
+        log.warning("无法写入 %s，本次使用临时密钥：重启后需要重新登录", SECRET_PATH)
+        return secrets.token_urlsafe(48)
 
 
 # --------------------------------------------------------------------------

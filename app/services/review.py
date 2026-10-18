@@ -15,10 +15,10 @@ import re
 import time
 from typing import Any
 
-from . import db
-from .config import load_settings
-from .languages import get_language
-from .llm import LLMError, chat
+from ..store import db
+from ..store import settings as store_settings
+from ..languages import get_language
+from .llm import LLMError, chat, conf_for
 
 log = logging.getLogger("sayit.review")
 
@@ -173,7 +173,7 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def generate(session_id: str, force: bool = False,
+async def generate(user: str, session_id: str, force: bool = False,
                    ui_lang: str = "zh") -> dict[str, Any]:
     """生成并落库一份复盘。
 
@@ -186,15 +186,14 @@ async def generate(session_id: str, force: bool = False,
         if cached and (cached.get("ui_lang") or "zh") == ui_lang:
             return cached
 
-    row = db.get_session(session_id)
+    row = db.get_session(session_id, user)
     if not row:
         raise ValueError("没有这通电话")
     turns = row.get("turns") or []
     if not any(t.get("role") == "user" for t in turns):
         raise ValueError("这通电话没有学员语音，无法复盘")
 
-    s = load_settings()
-    llm_conf = s.get("llm") or {}
+    llm_conf = conf_for(user)
     if not llm_conf.get("enabled", True):
         raise LLMError("复盘功能已在设置里关闭")
 
@@ -217,19 +216,19 @@ async def generate(session_id: str, force: bool = False,
     payload["generated_at"] = time.time()
     payload["model"] = llm_conf.get("model", "")
     payload["ui_lang"] = ui_lang      # 这份解释是用哪种母语写的
-    db.save_report(session_id, payload)
-    db.replace_errors(session_id, payload["errors"])
+    db.save_report(user, session_id, payload)
+    db.replace_errors(user, session_id, payload["errors"])
     log.info("复盘完成 %s：%d 条错误 %d 个生词", session_id,
              len(payload["errors"]), len(payload["new_words"]))
     return payload
 
 
-def focus_hint(limit_sessions: int = 6) -> str:
+def focus_hint(user: str, limit_sessions: int = 6) -> str:
     """把最近几通电话的高频错误类型，变成一句要注入 system prompt 的指令。
 
     这是「长期记忆」最便宜有效的形态：不存用户全部画像，只存"你最近老犯什么错"。
     """
-    stats = db.error_type_stats(limit_sessions)
+    stats = db.error_type_stats(user, limit_sessions)
     if not stats:
         return ""
     top = max(stats.items(), key=lambda kv: kv[1])
