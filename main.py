@@ -6,16 +6,17 @@
 但现在由 nginx 的真证书满足，不需要本地证书。
 
 用法：
-    python tools/serve.py                # http://127.0.0.1:8787
-    python tools/serve.py --port 9000
-    python tools/serve.py --host 0.0.0.0 # 让同一局域网的其它机器访问，默认只绑回环
-    python tools/serve.py --reload       # 改代码自动重启
+    python main.py                # http://127.0.0.1:8787
+    python main.py --port 9000
+    python main.py --host 0.0.0.0 # 让同一局域网的其它机器访问，默认只绑回环
+    python main.py --reload       # 改代码自动重启
 """
 from __future__ import annotations
 
 import argparse
 import sys
 from pathlib import Path
+from app.main import app
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -41,7 +42,7 @@ def main() -> int:
 
     import uvicorn
 
-    uvicorn.run("app.main:app", host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
     return 0
 
 

@@ -9,7 +9,7 @@
 #   ./run.sh --host 0.0.0.0
 #   ./run.sh --reload         # 改代码自动重启
 #
-# 额外参数原样透传给 tools/serve.py。
+# 额外参数原样透传给 tools/main.py。
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -38,4 +38,4 @@ if [[ ! -f ".env" ]]; then
   exit 1
 fi
 
-exec "$PY" tools/serve.py "$@"
+exec "$PY" main.py "$@"
