@@ -719,6 +719,17 @@ async def me_page() -> FileResponse:
     return FileResponse(WEB_DIR / "me.html")
 
 
+@app.get("/settings.js")
+async def settings_script() -> FileResponse:
+    """设置页脚本。
+
+    刻意不做成 /static/settings.js：/static/ 在登录门禁的公开前缀里，
+    放进去等于匿名可读。这里走受 require_login 保护的路由，
+    和页面本身的门禁保持一致。
+    """
+    return FileResponse(WEB_DIR / "settings.js", media_type="application/javascript")
+
+
 @app.get("/sw.js")
 async def service_worker() -> FileResponse:
     return FileResponse(WEB_DIR / "sw.js", media_type="application/javascript")

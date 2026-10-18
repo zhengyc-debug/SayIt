@@ -69,10 +69,26 @@
     return out;
   }
 
+  function renderProviderSummary() {
+    const el = $('provider-summary');
+    if (!el) return;
+    const parts = boot.providers.map(p => {
+      const conf = boot.provider_settings[p.id] || {};
+      const mark = conf.api_key_set ? '✓' : '✗';
+      return `${p.label.split(' · ')[0]} ${mark}`;
+    });
+    const activeConf = boot.provider_settings[boot.active.provider] || {};
+    const head = activeConf.api_key_set
+      ? `${T('当前语音模型')}：已配 Key（${activeConf.api_key_masked || ''}）`
+      : `${T('当前语音模型')}：未配 Key，无法通话`;
+    el.innerHTML = `${head}　|　${parts.join('　')}`;
+  }
+
   function renderProviders() {
     const host = $('providers');
     host.innerHTML = '';
     const activeId = boot.active.provider;
+    renderProviderSummary();
 
     for (const p of boot.providers) {
       const conf = boot.provider_settings[p.id] || {};
