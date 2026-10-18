@@ -379,7 +379,13 @@
 
     ws.onerror = () => {
       setStatus(`<span class="err">${T('连接失败')}</span>`);
-      el.toast.innerHTML = '连接服务端失败，检查服务是否还在跑、网络是否正常。若刚重启过服务，刷新页面重新登录。';
+      // 手机上报「连接服务器失败」时别只说检查服务：这里把真实原因分清楚，
+      // 否则证书不匹配（IP 访问 + 域名证书）会被误当成服务挂了。
+      const ipLike = /^(\d{1,3}\.){3}\d{1,3}$/.test(location.hostname);
+      const hint = location.protocol !== 'https:'
+        ? '当前不是 https，浏览器会拦住 wss 和麦克风。'
+        : (ipLike ? '你正用 IP 访问，而服务器证书是给域名签的 —— 手机会直接拒绝 wss 连接（PC 上点“继续访问”能过，手机不行）。请改用证书对应的域名访问。' : '');
+      el.toast.innerHTML = `连接失败。${hint || '检查服务是否在跑、网络是否正常；若刚重启过服务，刷新页面重新登录。'}`;
       el.toast.className = 'toast show err';
       el.toast.style.pointerEvents = 'auto';
       clearTimeout(toast._t);

@@ -222,6 +222,8 @@
       renderProviders();
       renderLlm();
       renderCommon();
+      // 保存成功后回「我的」：设置改完就是回主流程，别让人停在设置页
+      setTimeout(() => location.assign('/me'), 600);
     }
     return boot;
   }
@@ -241,10 +243,12 @@
 
   $('s-language').onchange = () => { renderLevels(); renderProviders(); };
   $('btn-save').onclick = () => save(false).catch(e => toast(e.message, true));
-  $('btn-reload').onclick = async () => {
-    boot = await (await fetch('/api/bootstrap')).json();
-    renderCommon(); renderProviders(); renderLlm();
-    toast(T('已恢复为已保存的配置'));
+  $('btn-reload').onclick = () => {
+    // 放弃修改 = 丢掉未保存的编辑并回「我的」。不做「重载数据留在本页」那种半吊子行为，
+    // 免得以为点了之后改动还在。
+    if (confirm(T('放弃未保存的修改并返回？'))) {
+      location.assign('/me');
+    }
   };
 
   if (window.I18N) I18N.mountSwitch($('lang-host'));
