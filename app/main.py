@@ -38,6 +38,7 @@ from .routers import (
     pages_routes,
     settings_routes,
     stats_routes,
+    words_routes,
 )
 from .store import db
 from .store import settings as store
@@ -66,7 +67,8 @@ async def no_cache_static(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
     if path.startswith("/static") or path in (
-            "/", "/settings", "/history", "/stats", "/me", "/settings.js"):
+            "/", "/settings", "/history", "/stats", "/me", "/settings.js",
+            "/words", "/words.js", "/words.html", "/theme.js"):
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -121,6 +123,7 @@ app.include_router(settings_routes.router)
 app.include_router(call_routes.router)
 app.include_router(history_routes.router)
 app.include_router(stats_routes.router)
+app.include_router(words_routes.router)
 app.include_router(me_routes.router)
 app.include_router(pages_routes.router)
 

@@ -68,8 +68,40 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "show_captions": True,
         "show_pinyin_hint": False,
         "call_time_limit_min": 15,
+        # 语速（决定 AI 说得多快）。豆包 session.create 的 audio.output.speed，
+        # 实测取 -50/0/50/100 时同一句话的音频长度约 14s / 8s / 4.5s / 3.6s。
+        # 默认 -30：练口语时宁可慢一点听清楚。调了就一直生效，不用每次让 AI"说慢点"。
+        "speech_speed": "slow",
     },
 }
+
+# 语速档位：名字 → 各供应商的参数值。前端只认名字，供应商差异留在后端。
+SPEECH_SPEEDS: dict[str, dict[str, Any]] = {
+    "slowest": {"label": "最慢", "label_en": "Slowest", "speed": -50},
+    "slow": {"label": "慢", "label_en": "Slow", "speed": -30},
+    "normal": {"label": "正常", "label_en": "Normal", "speed": 0},
+    "fast": {"label": "快", "label_en": "Fast", "speed": 50},
+}
+DEFAULT_SPEED = "slow"
+
+
+def speed_value(name: str | None) -> float:
+    """档位名 → 供应商参数值。未知值一律回落到默认档。"""
+    rec = SPEECH_SPEEDS.get(str(name or DEFAULT_SPEED))
+    if rec is None:
+        rec = SPEECH_SPEEDS[DEFAULT_SPEED]
+    return float(rec["speed"])
+
+
+def speed_label(name: str | None) -> str:
+    """给 prompt 用的一句话描述（让模型自己的措辞也配合慢速）。"""
+    name = name if name in SPEECH_SPEEDS else DEFAULT_SPEED
+    return {
+        "slowest": "very slowly, with clear separation between words",
+        "slow": "slowly and clearly",
+        "normal": "at a natural conversational pace",
+        "fast": "at a brisk natural pace",
+    }[name]
 
 _lock = threading.RLock()
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_.@-]+")
@@ -171,6 +203,11 @@ def public_settings(username: str) -> dict[str, Any]:
         conf["api_key_masked"] = mask_key(conf.get("api_key"))
         conf["api_key_set"] = bool(conf.get("api_key"))
         conf.pop("api_key", None)
+    # 语速档位的可选项也下发，前端不硬编码名字/顺序
+    s["speech_speeds"] = [
+        {"id": k, "label": v["label"], "label_en": v["label_en"], "speed": v["speed"]}
+        for k, v in SPEECH_SPEEDS.items()
+    ]
     return s
 
 

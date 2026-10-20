@@ -30,6 +30,7 @@ async def bootstrap(user: str = Depends(current_user)) -> dict[str, Any]:
     return {
         "active": s["active"],
         "ui": s["ui"],
+        "speech_speeds": s["speech_speeds"],
         # 每门语言下 AI 的默认名字，settings 里配了 assistant_name 时优先用配置
         "names": {code: default_name(code) for code in LANGUAGES},
         "languages": public_languages(),
@@ -70,7 +71,8 @@ async def test_provider(request: Request, user: str = Depends(current_user)):
     try:
         prov = create_provider(pid, conf=conf,
                                instructions="You are a connectivity test. Say OK and stop.",
-                               voice=voice, language_code=lang_code)
+                               voice=voice, language_code=lang_code,
+                               speed=store.speed_value(conf_all.get("ui", {}).get("speech_speed")))
         t0 = time.perf_counter()
         await prov.connect()
         ms = int((time.perf_counter() - t0) * 1000)

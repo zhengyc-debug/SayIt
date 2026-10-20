@@ -67,8 +67,9 @@ class DoubaoProvider(RealtimeProvider):
     assistant_text_mode = "incremental"
 
     def __init__(self, conf: dict[str, Any], instructions: str = "",
-                 voice: str = "", language_code: str = "en"):
-        super().__init__(conf, instructions, voice, language_code)
+                 voice: str = "", language_code: str = "en",
+                 speed: float | None = None):
+        super().__init__(conf, instructions, voice, language_code, speed=speed)
         self.url = self.endpoint or WS_URL
         self.model = self.model or "1.2.6.1"
         self._ws: Any = None
@@ -108,6 +109,10 @@ class DoubaoProvider(RealtimeProvider):
 
     # ------------------------------------------------------------------
     def _session_payload(self) -> dict[str, Any]:
+        # speed：会话级语速，-50（很慢）~ 100（很快），0 为默认。
+        # 实测同一句话 -50/0/50/100 分别约 14s/8s/4.5s/3.6s —— 是真实生效的，
+        # 所以「让它说慢点」必须走这里，而不是靠 prompt 求它。
+        speed = int(round(self.speed)) if self.speed is not None else 0
         return {
             "type": "session.create",
             "session": {
@@ -118,7 +123,7 @@ class DoubaoProvider(RealtimeProvider):
                     "output": {
                         "format": {"type": self.output_format, "rate": self.audio_out_rate},
                         "voice": self.voice,
-                        "speed": 0,
+                        "speed": speed,
                         "loudness": 0,
                     },
                 },

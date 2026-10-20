@@ -54,6 +54,12 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  nginx:
+    image: nginx:latest
+    container_name: nginx_for_sayit
+    ports:
+      - "433:433"
+
 volumes:
   sayit-data:
     name: sayit-data

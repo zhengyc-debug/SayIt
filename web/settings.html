@@ -7,6 +7,7 @@
 <title>SayIt · 设置</title>
 <link rel="icon" href="/static/icon.svg" />
 <link rel="stylesheet" href="/static/styles.css" />
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <div class="page">
@@ -16,7 +17,19 @@
       <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
       <h1 style="margin-top:6px">设置</h1>
     </div>
+    <div id="theme-host"></div>
     <div id="lang-host"></div>
+  </div>
+
+  <h2>外观</h2>
+  <div class="card tight">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="flex:1 1 auto;min-width:140px">
+        <div style="font-size:14px;font-weight:550">主题</div>
+        <div class="hint">深色适合晚上躺在床上练，浅色在白天光线强时更清楚。</div>
+      </div>
+      <div id="theme-switch"></div>
+    </div>
   </div>
 
   <h2>默认通话设置</h2>
@@ -33,6 +46,9 @@
       </label>
       <label class="field">AI 名字（留空用默认）
         <input id="s-name" placeholder="Emma" />
+      </label>
+      <label class="field">语速
+        <select id="s-speed"></select>
       </label>
     </div>
     <p class="hint" style="margin-top:14px" data-i18n="registry-hint">

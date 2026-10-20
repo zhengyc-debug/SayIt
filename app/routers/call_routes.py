@@ -129,6 +129,13 @@ async def ws_call(ws: WebSocket) -> None:
             return
 
         extra_rules = req.get("extra_rules") or ""
+        # 语速：前端选的档位 > 设置里的默认值。会话级参数，整通电话都固定，
+        # 不会因为用户中途说「说慢点」而过一会儿又变回去。
+        speed_name = str(req.get("speed") or s.get("ui", {}).get("speech_speed") or "slow")
+        from ..store.settings import SPEECH_SPEEDS, speed_value
+        if speed_name not in SPEECH_SPEEDS:
+            speed_name = "slow"
+        speed = speed_value(speed_name)
         try:
             # 长期记忆：水平 / 常犯错 / 最近聊过什么 / 用户自述 → 拼进 prompt
             hint = profile_svc.prompt_hint(user, lang_code, level)
@@ -144,16 +151,17 @@ async def ws_call(ws: WebSocket) -> None:
             level=level,
             assistant_name=req.get("assistant_name") or "",
             extra_rules=extra_rules,
+            speed_name=speed_name,
         )
 
         session_id = db.create_session(
             user, provider=provider_id, language=lang_code, scenario=scenario_id,
             level=level, voice=voice,
-            meta={"instructions": instructions[:4000]},
+            meta={"instructions": instructions[:4000], "speed": speed_name},
         )
 
         provider = create_provider(provider_id, conf=conf, instructions=instructions,
-                                   voice=voice, language_code=lang_code)
+                                   voice=voice, language_code=lang_code, speed=speed)
         try:
             await provider.connect()
         except ProviderSetupError as e:
@@ -173,11 +181,13 @@ async def ws_call(ws: WebSocket) -> None:
             "scenario": scenario_id,
             "level": level,
             "voice": voice,
+            "speed": speed_name,
             "audio_in_rate": provider.audio_in_rate,
             "audio_out_rate": provider.audio_out_rate,
         })
-        log.info("通话开始 %s user=%s provider=%s lang=%s scenario=%s level=%s voice=%s",
-                 session_id, user, provider_id, lang_code, scenario_id, level, voice)
+        log.info("通话开始 %s user=%s provider=%s lang=%s scenario=%s level=%s voice=%s speed=%s",
+                 session_id, user, provider_id, lang_code, scenario_id, level, voice,
+                 speed_name)
 
         await _pump(ws, provider, session_id)
         # 挂断后在后台出复盘，不阻塞用户
@@ -273,7 +283,7 @@ async def _pump(ws: WebSocket, provider: Any, session_id: str) -> None:
         except WebSocketDisconnect:
             stop.set()
         except Exception as e:
-            log.info("上行结束: %s", e)
+            log.info("上行结束: %s: %r", type(e).__name__, e)
             stop.set()
 
     async def to_browser() -> None:
@@ -336,6 +346,13 @@ async def _pump(ws: WebSocket, provider: Any, session_id: str) -> None:
     down = asyncio.create_task(to_browser(), name="down")
     try:
         await stop.wait()
+        log.info("泵结束 %s", session_id)
     finally:
         for t in (up, down):
             t.cancel()
+        # 记录供应商侧统计（含首帧延迟），事后排查延迟/断流时有据可查
+        try:
+            if getattr(provider, "stats", None):
+                log.info("通话统计 %s %s", session_id, provider.stats)
+        except Exception:
+            pass

@@ -41,8 +41,9 @@ class OpenAIRealtimeProvider(RealtimeProvider):
     audio_out_rate = 24000
 
     def __init__(self, conf: dict[str, Any], instructions: str = "",
-                 voice: str = "", language_code: str = "en"):
-        super().__init__(conf, instructions, voice, language_code)
+                 voice: str = "", language_code: str = "en",
+                 speed: float | None = None):
+        super().__init__(conf, instructions, voice, language_code, speed=speed)
         self.url = self.endpoint or "wss://api.openai.com/v1/realtime"
         self.model = self.model or "gpt-realtime"
         self._ws: Any = None
@@ -99,18 +100,22 @@ class OpenAIRealtimeProvider(RealtimeProvider):
             raise ProviderSetupError(f"连不上 OpenAI：{type(e).__name__}: {e}") from e
 
         self._reader_task = asyncio.create_task(self._reader(), name="openai-reader")
-        await self._ws.send(json.dumps({
-            "type": "session.update",
-            "session": {
-                "modalities": ["text", "audio"],
-                "instructions": self.instructions,
-                "voice": self.voice or "marin",
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "input_audio_transcription": {"model": "gpt-realtime-whisper"},
-                "turn_detection": {"type": "server_vad", "silence_duration_ms": 500},
-            },
-        }))
+        # speed 用「相对词数」表达：OpenAI 的 realtime 没有 speed 参数，
+        # 支持的是 audio.output.speed（0.25~1.5），这里把豆包风格的
+        # -50~100 折算成比例，保证切换供应商时用户选的那档听起来一致。
+        session: dict[str, Any] = {
+            "modalities": ["text", "audio"],
+            "instructions": self.instructions,
+            "voice": self.voice or "marin",
+            "input_audio_format": "pcm16",
+            "output_audio_format": "pcm16",
+            "input_audio_transcription": {"model": "gpt-realtime-whisper"},
+            "turn_detection": {"type": "server_vad", "silence_duration_ms": 500},
+        }
+        if self.speed is not None:
+            ratio = 1.0 + float(self.speed) / 100.0 * 0.5    # -50→0.75, 50→1.25
+            session["audio"] = {"output": {"speed": max(0.25, min(1.5, ratio))}}
+        await self._ws.send(json.dumps({"type": "session.update", "session": session}))
         try:
             await asyncio.wait_for(self._ready.wait(), timeout=20)
         except asyncio.TimeoutError:

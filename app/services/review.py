@@ -218,6 +218,11 @@ async def generate(user: str, session_id: str, force: bool = False,
     payload["ui_lang"] = ui_lang      # 这份解释是用哪种母语写的
     db.save_report(user, session_id, payload)
     db.replace_errors(user, session_id, payload["errors"])
+    # 复盘里的生词顺手进生词本：用户不用再手动收藏一次
+    try:
+        db.add_words(user, session_id, payload["new_words"], ui_lang=ui_lang)
+    except Exception:
+        log.exception("写入生词本失败（不影响复盘）")
     log.info("复盘完成 %s：%d 条错误 %d 个生词", session_id,
              len(payload["errors"]), len(payload["new_words"]))
     return payload

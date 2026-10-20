@@ -139,11 +139,15 @@ class RealtimeProvider(abc.ABC):
         instructions: str = "",
         voice: str = "",
         language_code: str = "en",
+        speed: float | None = None,
     ):
         self.conf = conf or {}
         self.instructions = instructions
         self.voice = voice
         self.language_code = language_code
+        # 语速：供应商原始参数值（豆包 -50~100，0 为默认）。
+        # 会话级参数 —— 建会话时定下，整通电话都生效，不需要用户反复要求。
+        self.speed = speed
         self.api_key = str(self.conf.get("api_key") or "")
         self.endpoint = str(self.conf.get("endpoint") or "")
         self.model = str(self.conf.get("model") or "")

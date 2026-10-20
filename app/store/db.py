@@ -67,6 +67,19 @@ CREATE TABLE IF NOT EXISTS profile (
     notes         TEXT DEFAULT '',
     updated_at    REAL
 );
+
+-- 「顺手记住」的生词本。每个词一张卡：音标 / 释义 / 例句 / 词形变化。
+-- payload 存整份卡片 JSON（由 LLM 生成后缓存），ui_lang 记录解释用的是哪种母语。
+CREATE TABLE IF NOT EXISTS words (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user        TEXT NOT NULL DEFAULT '',
+    word        TEXT NOT NULL,
+    session_id  TEXT,
+    meaning     TEXT,
+    ui_lang     TEXT DEFAULT 'zh',
+    payload     TEXT,
+    created_at  REAL NOT NULL
+);
 """
 
 # 老表 -> 需要补的列
@@ -124,6 +137,9 @@ def _migrate(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user"
               " ON sessions(user, started_at DESC)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_errors_user ON errors(user, ts DESC)")
+    # 生词要去重（同一个词在多通电话里出现只留最早上次出现的一条）
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_words_user_word"
+              " ON words(user, lower(word))")
 
 
 def init_db() -> None:
@@ -326,3 +342,99 @@ def recent_reports(user: str, limit: int = 8) -> list[dict[str, Any]]:
         except Exception:
             pass
     return out
+
+
+# ---------------------------------------------------------------------------
+# 生词本
+# ---------------------------------------------------------------------------
+def add_words(user: str, session_id: str, words: list[dict[str, Any]],
+              ui_lang: str = "zh") -> int:
+    """把复盘里的 new_words 落进生词本。
+
+    同一个词（不分大小写）只留一条：重复出现时刷新 session_id/meaning，
+    但不清空已经生成的卡片 payload —— 那是花 token 换来的，没必要重算。
+    返回新增条数。
+    """
+    rows = []
+    for w in words or []:
+        word = str(w.get("word") or "").strip()
+        if not word:
+            continue
+        rows.append((user, word, session_id, str(w.get("meaning") or "").strip(),
+                     ui_lang, time.time()))
+    if not rows:
+        return 0
+    added = 0
+    with _lock, _conn() as c:
+        for row in rows:
+            cur = c.execute("SELECT id FROM words WHERE user=? AND lower(word)=lower(?)",
+                            (user, row[1])).fetchone()
+            if cur:
+                c.execute("UPDATE words SET session_id=?, meaning=COALESCE(NULLIF(?,''),"
+                          " meaning) WHERE id=?", (row[2], row[3], cur["id"]))
+            else:
+                c.execute("INSERT INTO words (user, word, session_id, meaning, ui_lang,"
+                          " created_at) VALUES (?,?,?,?,?,?)", row)
+                added += 1
+    return added
+
+
+def list_words(user: str, limit: int = 300) -> list[dict[str, Any]]:
+    with _lock, _conn() as c:
+        rows = c.execute(
+            "SELECT id, word, session_id, meaning, ui_lang, payload, created_at"
+            " FROM words WHERE user=? ORDER BY created_at DESC LIMIT ?",
+            (user, max(1, int(limit)))).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["card"] = json.loads(d.pop("payload") or "null")
+        except Exception:
+            d["card"] = None
+        out.append(d)
+    return out
+
+
+def get_word(user: str, word: str) -> dict[str, Any] | None:
+    with _lock, _conn() as c:
+        r = c.execute("SELECT id, word, session_id, meaning, ui_lang, payload, created_at"
+                      " FROM words WHERE user=? AND lower(word)=lower(?)",
+                      (user, (word or "").strip())).fetchone()
+    if not r:
+        return None
+    d = dict(r)
+    try:
+        d["card"] = json.loads(d.pop("payload") or "null")
+    except Exception:
+        d["card"] = None
+        d.pop("payload", None)
+    return d
+
+
+def save_word_card(user: str, word: str, card: dict[str, Any], ui_lang: str) -> None:
+    with _lock, _conn() as c:
+        row = c.execute("SELECT id FROM words WHERE user=? AND lower(word)=lower(?)",
+                        (user, (word or "").strip())).fetchone()
+        payload = json.dumps(card, ensure_ascii=False)
+        if row:
+            c.execute("UPDATE words SET payload=?, ui_lang=? WHERE id=?",
+                      (payload, ui_lang, row["id"]))
+        else:
+            # 用户手动查了一个不在生词本里的词：顺手收进来
+            c.execute("INSERT INTO words (user, word, session_id, meaning, ui_lang, payload,"
+                      " created_at) VALUES (?,?,?,?,?,?,?)",
+                      (user, (word or "").strip(), "", "", ui_lang, payload, time.time()))
+
+
+def count_words(user: str) -> int:
+    with _lock, _conn() as c:
+        return int(c.execute("SELECT COUNT(*) n FROM words WHERE user=?",
+                             (user,)).fetchone()["n"])
+
+
+def delete_word(user: str, word: str) -> bool:
+    with _lock, _conn() as c:
+        cur = c.execute("DELETE FROM words WHERE user=? AND lower(word)=lower(?)",
+                        (user, (word or "").strip()))
+        return cur.rowcount > 0

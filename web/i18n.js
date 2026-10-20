@@ -117,6 +117,68 @@
     '通': 'calls',
     '页': '',
 
+    // ---------------- 语速 / 主题 ----------------
+    '语速': 'Speed',
+    'AI 的说话速度（整通电话固定）': 'How fast the AI talks (fixed for the whole call)',
+    '语速已设为 {v}': 'Speed set to {v}',
+    '正在切换语速…': 'Switching speed…',
+    '最慢': 'Slowest',
+    '慢': 'Slow',
+    '正常': 'Normal',
+    '快': 'Fast',
+    '主题': 'Theme',
+    '深色': 'Dark',
+    '浅色': 'Light',
+    '跟随系统': 'System',
+    '外观': 'Appearance',
+    '深色适合晚上躺在床上练，浅色在白天光线强时更清楚。':
+      'Dark for evening practice, light when the room is bright.',
+    '切换深浅色': 'Toggle light / dark',
+    '语速（整通电话固定）': 'Speed (fixed for the call)',
+
+    // ---------------- 重听 ----------------
+    '重听': 'Replay',
+    '播放中…': 'Playing…',
+    '重新播放这一段': 'Play this part again',
+    '播放失败': 'Playback failed',
+    '语音已更新为所选语速': 'Voice now uses the selected speed',
+
+    // ---------------- 词卡 / 生词本 ----------------
+    'SayIt · 生词本': 'SayIt · Wordbook',
+    '生词本': 'Wordbook',
+    '顺手记住的词': 'Words worth remembering',
+    '顺手记住的词单独一页': 'Saved words now have their own page',
+    '每通电话挂断后，复盘里标出的生词会自动进这里。点开一个词看音标、释义、例句和词形变化。':
+      'Every call ends with a review; the words it flags land here. Tap one for phonetics, meanings, examples and inflections.',
+    '打开生词本': 'Open the wordbook',
+    '音标 · 释义 · 例句 · 词形变化': 'Phonetics · meanings · examples · inflections',
+    '复盘里「顺手记住」的词，点开看音标 / 例句 / 词形变化':
+      'Words saved from reviews — tap one for phonetics, examples and inflections',
+    '点开看音标、例句和词形变化': 'Tap for phonetics, examples and word forms',
+    '词卡': 'Word card',
+    '释义': 'Meaning',
+    '例句': 'Examples',
+    '词形变化': 'Word forms',
+    '读单词': 'Say the word',
+    '读例句': 'Say an example',
+    '重新生成': 'Regenerate',
+    '正在生成词卡…': 'Building the word card…',
+    '词卡生成失败': 'Could not build the word card',
+    '重试': 'Retry',
+    '查一个词，例如 receive / break the ice': 'Look up a word, e.g. receive',
+    '查词': 'Look up',
+    '{n} 个': '{n} words',
+    '生词总数': 'Words',
+    '已生成词卡': 'Cards built',
+    '待生成': 'Not built yet',
+    '生词本还是空的。': 'Your wordbook is empty.',
+    '打完一通电话并生成复盘后，复盘里「顺手记住」的词会自动出现在这里。':
+      'Finish a call and let the review run — the words it picks show up here.',
+    '把「{w}」移出生词本？': 'Remove “{w}” from the wordbook?',
+    '移出生词本': 'Remove',
+    '完成': 'Done',
+    '听一遍': 'Listen',
+
     // ---------------- 错题本 ----------------
     'SayIt · 错题本': 'SayIt · Mistakes',
     '错误类型分布': 'Mistake types',

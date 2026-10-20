@@ -18,8 +18,10 @@ router = APIRouter(tags=["pages"])
 PUBLIC_STATIC = {
     "styles.css",        # 所有页面（含登录页）的样式
     "i18n.js",           # 登录页和全站都用
+    "theme.js",          # 深/浅色主题，必须无条件公开（登录页也要跟着主题走）
     "nav.js",            # 底部标签栏
     "app.js",            # 通话页逻辑
+    "cards.js",          # 词卡（通话页 / 记录页 / 生词本共用）
     "audio-worklet.js",  # AudioWorklet，必须固定路径
     "icon.svg",          # favicon / PWA 图标
 }
@@ -55,6 +57,16 @@ async def history_page() -> FileResponse:
 @router.get("/stats")
 async def stats_page() -> FileResponse:
     return _page("stats.html")
+
+
+@router.get("/words")
+async def words_page() -> FileResponse:
+    """生词本：复盘里「顺手记住」的词都在这里，点开看音标 / 例句 / 词形。
+
+    为什么单独开一页而不是塞进错题本：错题本是「说错了什么」，
+    生词本是「学了什么」，混在一页用户会以为生词也是错题。
+    """
+    return _page("words.html")
 
 
 @router.get("/me")

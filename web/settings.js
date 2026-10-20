@@ -16,6 +16,25 @@
     return boot.languages.find(l => l.code === $('s-language').value) || boot.languages[0];
   }
 
+  // 主题选择器（深色 / 浅色 / 跟随系统）：纯前端偏好，不进服务端配置
+  function renderTheme() {
+    const host = $('theme-switch');
+    if (!host || !window.THEME) return;
+    host.innerHTML = '';
+    THEME.mountSwitch(host);
+  }
+
+  function renderSpeeds(cur) {
+    const sel = $('s-speed');
+    if (!sel) return;
+    const list = boot.speech_speeds || [];
+    const en = !!(window.I18N && I18N.lang === 'en');
+    sel.innerHTML = list.map(s =>
+      `<option value="${s.id}">${en ? s.label_en : s.label}</option>`).join('');
+    const want = cur || (boot.ui && boot.ui.speech_speed) || 'slow';
+    sel.value = list.some(s => s.id === want) ? want : (list[0] || {}).id || '';
+  }
+
   function renderCommon() {
     const a = boot.active;
     const en = !!(window.I18N && I18N.lang === 'en');
@@ -27,6 +46,8 @@
     $('s-scenario').value = a.scenario;
     $('s-name').value = a.assistant_name || '';
     renderLevels(a.level);
+    renderSpeeds();
+    renderTheme();
   }
 
   function renderLevels(pick) {
@@ -204,6 +225,8 @@
         level: $('s-level').value,
         assistant_name: $('s-name').value.trim(),
       },
+      // 语速：默认通话语速（通话页那一排的默认值，也是通话中不选时用的档）
+      ui: { speech_speed: $('s-speed') ? $('s-speed').value : undefined },
       providers,
     };
   }

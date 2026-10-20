@@ -35,6 +35,7 @@ async def chat(
     temperature: float = 0.3,
     max_tokens: int = 1500,
     timeout: float = 90.0,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     if not api_key:
         raise LLMError("还没有配置文本模型 API Key —— 请到「设置 → 复盘用文本模型」里填入你自己的 Key")
@@ -49,6 +50,8 @@ async def chat(
         "max_tokens": max_tokens,
         "stream": False,
     }
+    if response_format:
+        payload["response_format"] = response_format
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

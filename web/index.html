@@ -10,6 +10,8 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="/static/icon.svg" />
 <link rel="stylesheet" href="/static/styles.css" />
+<!-- 主题必须在样式表之后、首屏之前跑一次，否则浅色用户会先看到一帧黑底 -->
+<script src="/static/theme.js"></script>
 </head>
 <body class="call-page">
 
@@ -18,18 +20,33 @@
   <header class="topbar">
     <div class="wordmark">Say<span>It</span><i class="dot"></i></div>
     <div class="grow"></div>
+    <!-- 主题：深色 / 浅色一键切换（存 localStorage，跟随设备） -->
+    <button class="icon-btn themebtn" id="btn-theme" title="切换深浅色">
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z" />
+      </svg>
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4.2" />
+        <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4 7 7M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6" />
+      </svg>
+    </button>
     <!-- 右上角切换的是「我的母语」，只影响界面文案和复盘解释；练习语言在下面那一排 -->
     <div id="lang-host"></div>
   </header>
 
   <section class="setup">
-    <div class="setup-row">
+    <div class="setup-row collapsible">
       <span class="setup-label">场景</span>
       <div class="chiprow" id="row-scen"></div>
     </div>
-    <div class="setup-row">
+    <div class="setup-row collapsible">
       <span class="setup-label">语言</span>
       <div class="chiprow" id="row-meta"></div>
+    </div>
+    <!-- 语速：真正下发给供应商的会话参数，整通电话固定，不会"过一会儿又变回去" -->
+    <div class="setup-row speed-row">
+      <span class="setup-label">语速</span>
+      <div class="chiprow" id="row-speed"></div>
     </div>
   </section>
 
@@ -97,14 +114,34 @@
       <div class="rp-loading"><span class="spinner"></span> 正在分析你的表达…</div>
     </div>
     <div class="modal-foot">
+      <a class="btn" href="/words">生词本</a>
       <a class="btn" href="/stats">看错题本</a>
       <button class="btn primary" id="rp-again">再打一通</button>
     </div>
   </div>
 </div>
 
+<!-- 词卡：复盘点开「顺手记住」里的词 -->
+<div class="modal" id="word-modal" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <h3>词卡</h3>
+        <div class="sub" id="wc-sub"></div>
+      </div>
+      <button class="icon-btn" id="wc-close" title="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="wc-body"></div>
+    <div class="modal-foot">
+      <button class="btn" id="wc-listen">🔊 听一遍</button>
+      <a class="btn primary" href="/words">打开生词本</a>
+    </div>
+  </div>
+</div>
+
 <script src="/static/i18n.js"></script>
 <script src="/static/nav.js"></script>
+<script src="/static/cards.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

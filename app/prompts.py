@@ -28,6 +28,8 @@ turn back with a question or a short prompt.
 you are doing. Just talk.
 - Match your vocabulary and grammar to the learner's level. Do not use words \
 far above their level unless you immediately make the meaning obvious from context.
+- Speak {pace}. The pacing is already set in the audio engine — never talk about \
+it, never promise to change it, never say "I'll slow down". Just speak.
 
 ## How you handle mistakes
 - Do NOT correct the learner out loud. No "you should say", no "the correct \
@@ -65,6 +67,7 @@ def build_instructions(
     level: str,
     assistant_name: str = "",
     extra_rules: str = "",
+    speed_name: str = "",
 ) -> str:
     lang = get_language(language_code)
     scenario = get_scenario(scenario_id)
@@ -74,13 +77,17 @@ def build_instructions(
     opening = pick_localized(scenario.get("opening", {}), language_code)
     scenario_prompt = pick_localized(scenario.get("prompt", {}), language_code)
 
+    from .store.settings import speed_label, DEFAULT_SPEED
+    pace = speed_label(speed_name or DEFAULT_SPEED)
+
     parts: list[str] = []
     parts.append(
         f"You are {name}, a warm and easy-going native {language_word} speaker. "
         f"You are having a real-time voice call with a learner whose {language_word} "
         f"is around CEFR level {level}."
     )
-    parts.append(TEACHING_RULES.format(language=language_word, native_hint=native_hint))
+    parts.append(TEACHING_RULES.format(language=language_word, native_hint=native_hint,
+                                       pace=pace))
     parts.append(f"## The situation\n{scenario_prompt}")
     if opening:
         parts.append(

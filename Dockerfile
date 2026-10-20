@@ -11,8 +11,6 @@ COPY tools ./tools/
 COPY data ./data/
 COPY main.py ./
 
-
-
 EXPOSE 8787
 
 CMD ["python","main.py", "--host", "0.0.0.0", "--port", "8787"]

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#080b12" />
+<title>SayIt · 生词本</title>
+<link rel="icon" href="/static/icon.svg" />
+<link rel="stylesheet" href="/static/styles.css" />
+<script src="/static/theme.js"></script>
+</head>
+<body>
+<div class="page">
+
+  <div class="page-head">
+    <div class="grow">
+      <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
+      <h1 style="margin-top:6px">生词本</h1>
+    </div>
+    <div id="theme-host"></div>
+    <div id="lang-host"></div>
+  </div>
+
+  <!-- 手动查词：不在生词本里的词也能查，查完自动收进来 -->
+  <div class="card tight" style="display:flex;gap:9px;align-items:center">
+    <input id="q" placeholder="查一个词，例如 receive / break the ice"
+           autocapitalize="off" autocorrect="off" spellcheck="false"
+           style="flex:1 1 auto;min-width:0" />
+    <button class="btn primary sm" id="q-go">查词</button>
+  </div>
+
+  <div id="nums" class="nums" style="margin-top:14px"></div>
+
+  <h2>顺手记住的词 <small id="cnt"></small></h2>
+  <p class="sub">每通电话挂断后，复盘里标出的生词会自动进这里。点开一个词看音标、释义、例句和词形变化。</p>
+  <div id="list"><div class="empty">加载中…</div></div>
+</div>
+
+<!-- 词卡：点任意一个词打开 -->
+<div class="modal" id="word-modal" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><h3>词卡</h3><div class="sub" id="wc-sub"></div></div>
+      <button class="icon-btn" id="wc-close" title="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="wc-body" data-word=""></div>
+    <div class="modal-foot">
+      <button class="btn" id="wc-del" style="color:var(--err-ink)">移出生词本</button>
+      <button class="btn primary" id="wc-done">完成</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/nav.js"></script>
+<script src="/static/cards.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const T = (s, v) => (window.I18N ? I18N.t(s, v) : s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uiLang = () => (window.I18N ? I18N.lang : 'zh');
+let words = [];
+
+function render() {
+  const list = $('list');
+  $('cnt').textContent = words.length ? T('{n} 个', { n: words.length }) : '';
+  if (!words.length) {
+    list.innerHTML = `<div class="empty">${T('生词本还是空的。')}<br>
+      ${T('打完一通电话并生成复盘后，复盘里「顺手记住」的词会自动出现在这里。')}</div>`;
+    return;
+  }
+  list.innerHTML = `<div class="wordgrid">` + words.map(w => {
+    const card = w.card || {};
+    const ph = card.phonetic_us || card.phonetic_uk || '';
+    const label = card.meaning || w.meaning || '';
+    return `<button type="button" class="wordcard" data-word="${esc(w.word)}"
+              data-meaning="${esc(label)}">
+        <div class="w">${esc(w.word)}</div>
+        <div class="ph">${esc(ph)}</div>
+        <div class="mn">${esc(label)}</div>
+      </button>`;
+  }).join('') + `</div>`;
+  if (window.I18N) I18N.apply(list);
+}
+
+function renderNums(total) {
+  const carded = words.filter(w => w.card).length;
+  $('nums').innerHTML = [
+    [T('生词总数'), total],
+    [T('已生成词卡'), carded],
+    [T('待生成'), Math.max(0, total - carded)],
+  ].map(([k, v]) => `<div class="num"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  if (window.I18N) I18N.apply($('nums'));
+}
+
+async function load() {
+  const d = await (await fetch('/api/words')).json();
+  words = d.words || [];
+  render();
+  renderNums(d.total == null ? words.length : d.total);
+}
+
+$('wc-done').onclick = () => $('word-modal').classList.remove('open');
+
+$('wc-del').onclick = async () => {
+  const body = $('wc-body');
+  const w = body.dataset.word || (body.querySelector('.wc-word') || {}).textContent;
+  if (!w) return;
+  if (!confirm(T('把「{w}」移出生词本？', { w }))) return;
+  await fetch('/api/words/' + encodeURIComponent(w), { method: 'DELETE' });
+  $('word-modal').classList.remove('open');
+  await load();
+};
+
+// WORDS.open 之后才知道是哪个词：把词名记在 body 上，供「移出」使用
+const origOpen = window.WORDS.open;
+window.WORDS.open = async (word, opt) => {
+  $('wc-body').dataset.word = word;
+  return origOpen(word, opt);
+};
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-word]');
+  if (t) $('wc-body').dataset.word = t.dataset.word;
+}, true);
+
+async function search() {
+  const w = $('q').value.trim();
+  if (!w) return;
+  await window.WORDS.open(w);
+  $('q').value = '';
+  await load();
+}
+
+$('q-go').onclick = search;
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
+
+if (window.I18N) {
+  I18N.mountSwitch($('lang-host'));
+  I18N.onChange(() => { render(); load().catch(() => {}); });
+}
+
+load().catch(e => {
+  $('list').innerHTML = `<div class="empty" style="color:var(--err-ink)">${T('加载失败：')}${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@
     wrap: $('avatar-wrap'), mute: $('btn-mute'), call: $('btn-call'), timer: $('timer'),
     whoName: $('who-name'), whoSub: $('who-sub'), idle: $('idle'), langHost: $('lang-host'),
     toast: $('toast'), rowScen: $('row-scen'), rowMeta: $('row-meta'), recap: $('recap'),
+    rowSpeed: $('row-speed'), theme: $('btn-theme'), wordModal: $('word-modal'),
     rpModal: $('report-modal'), rpTitle: $('rp-title'), rpSub: $('rp-sub'),
     rpBody: $('rp-body'), rpClose: $('rp-close'), rpAgain: $('rp-again'),
   };
@@ -23,6 +24,10 @@
     playCtx: null, playGain: null, playHead: 0, sources: new Set(),
     muted: false, t0: 0, tick: null, sessionId: null, limitMs: 0, warned: false,
     curUser: null, curAsst: null, pendingAudio: [],
+    // 语速：档位名（slowest/slow/normal/fast），没有值时用设置里的默认
+    speed: 'slow',
+    // 回放：把 AI 这一轮的 PCM 攒起来，`response.done` 时挂到字幕气泡上
+    rate: 24000, turnPcm: [], turnText: '', replay: null,
   };
 
   // ---------------------------------------------------------------- 工具
@@ -55,6 +60,7 @@
       const v = q.get(k);
       if (v) S.pick[k] = v;
     }
+    S.speed = (a.ui && a.ui.speech_speed) || (S.boot.ui && S.boot.ui.speech_speed) || 'slow';
     if (el.langHost && window.I18N) I18N.mountSwitch(el.langHost);
     renderChips();
     loadRecap();
@@ -119,7 +125,56 @@
         renderChips();
       }, 'lv'));
     }
+    renderSpeed();
     renderWho();
+  }
+
+  // 语速：单独一行，放在「语言」下面。通话中也可改 —— 改了立刻重连会话，
+  // 因为 speed 是建会话时的参数（服务端没有「运行时调速」事件）。
+  function renderSpeed() {
+    if (!el.rowSpeed) return;
+    const list = (S.boot && S.boot.speech_speeds) || [
+      { id: 'slowest', label: '最慢', label_en: 'Slowest' },
+      { id: 'slow', label: '慢', label_en: 'Slow' },
+      { id: 'normal', label: '正常', label_en: 'Normal' },
+      { id: 'fast', label: '快', label_en: 'Fast' },
+    ];
+    el.rowSpeed.innerHTML = '';
+    for (const sp of list) {
+      const on = sp.id === S.speed;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (on ? ' on' : '');
+      b.textContent = UI_EN() ? sp.label_en : sp.label;
+      b.title = T('AI 的说话速度（整通电话固定）');
+      b.onclick = () => pickSpeed(sp.id);
+      el.rowSpeed.appendChild(b);
+    }
+  }
+
+  function pickSpeed(id) {
+    if (id === S.speed) return;
+    S.speed = id;
+    renderSpeed();
+    // 记住选择：下次通话、下次打开页面都还是这一档
+    fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ui: { speech_speed: id } }),
+    }).catch(() => {});
+    if (S.inCall) {
+      // 建会话时就定死了语速 → 只能重连。对用户表现为「按当前进度接着聊」。
+      toast(T('正在切换语速…'), false, 2200);
+      reconnect();
+    } else {
+      toast(T('语速已设为 {v}', { v: speedLabel(id) }), false, 1600);
+    }
+  }
+
+  function speedLabel(id) {
+    const list = (S.boot && S.boot.speech_speeds) || [];
+    const r = list.find(x => x.id === id);
+    if (!r) return id;
+    return UI_EN() ? r.label_en : r.label;
   }
 
   // 通话对象：完整名字 + 场景/语言/等级，都跟着选择器走
@@ -179,13 +234,20 @@
     return S.playCtx;
   }
 
-  function playPcm(int16, rate) {
+  /** Int16 PCM → AudioBuffer（实时播放和「重听」共用） */
+  function pcmToBuffer(int16, rate) {
     const ctx = ensurePlayCtx();
-    if (ctx.state === 'suspended') ctx.resume();
     const f = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) f[i] = int16[i] / 32768;
     const buf = ctx.createBuffer(1, f.length, rate);
     buf.copyToChannel(f, 0);
+    return buf;
+  }
+
+  function playPcm(int16, rate) {
+    const ctx = ensurePlayCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const buf = pcmToBuffer(int16, rate);
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(S.playGain);
@@ -224,7 +286,86 @@
     el.captions.scrollTop = el.captions.scrollHeight;
   }
 
+  /* AI 这一轮说完（response.done）时，把攒下来的音频挂到这条字幕上：
+     点一下就原样重放，不需要再问模型一遍（省 token，也没有重新生成的延迟）。 */
+  function attachReplay() {
+    const pcm = S.turnPcm;
+    const text = S.turnText;
+    S.turnPcm = [];
+    S.turnText = '';
+    if (!pcm.length) return;
+
+    // 这一轮的 AI 气泡：优先拿还没收尾的那个；已经 final 了就拿最后一个 assistant 气泡
+    let cap = S.curAsst && S.curAsst.el;
+    if (!cap) {
+      const all = el.captions.querySelectorAll('.cap.assistant');
+      cap = all[all.length - 1];
+    }
+    if (!cap) return;
+    if (cap.querySelector('.cap-replay')) return;
+
+    const bytes = concatBytes(pcm);
+    const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
+    const rate = S.rate || 24000;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cap-replay';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5V5h4.5"/>
+        <path d="M4.6 9.2A8 8 0 1 1 4 13"/></svg><span>${T('重听')}</span>`;
+    btn.title = T('重新播放这一段');
+    btn.onclick = () => replay(btn, i16, rate, text);
+    cap.appendChild(btn);
+    el.captions.scrollTop = el.captions.scrollHeight;
+  }
+
+  function concatBytes(chunks) {
+    if (chunks.length === 1) return chunks[0];
+    let n = 0;
+    for (const c of chunks) n += c.byteLength;
+    const out = new Uint8Array(n);
+    let off = 0;
+    for (const c of chunks) { out.set(new Uint8Array(c), off); off += c.byteLength; }
+    return out;
+  }
+
+  function setReplayLabel(btn, txt) {
+    const s = btn.querySelector('span');
+    if (s) s.textContent = txt;
+   }
+
+  function replay(btn, i16, rate, text) {
+    // 正在重听同一条 → 停止
+    if (S.replay && S.replay.btn === btn) { stopReplay(); return; }
+    stopReplay();
+    try {
+      const ctx = ensurePlayCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const buf = pcmToBuffer(i16, rate);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(S.playGain);
+      src.start();
+      S.replay = { btn, src };
+      btn.classList.add('playing');
+      setReplayLabel(btn, T('播放中…'));
+      src.onended = () => { if (S.replay && S.replay.src === src) stopReplay(); };
+    } catch (e) {
+      toast(T('播放失败') + '：' + e.message, true, 4000);
+    }
+  }
+
+  function stopReplay() {
+    const r = S.replay;
+    S.replay = null;
+    if (!r) return;
+    try { r.src.stop(); } catch (e) {}
+    r.btn.classList.remove('playing');
+    setReplayLabel(r.btn, T('重听'));
+  }
+
   // 开场白：服务端预生成的、和对话同音色的录音（见 tools/gen_greetings.py）
+  // 有音频时缓存成 AudioBuffer，这样开场白也能「重听」。
   async function playGreeting(g) {
     if (!g || !g.text) return;
     setCaption('assistant', g.text, true);
@@ -247,9 +388,40 @@
         el.avatar.classList.remove('speaking');
         el.wrap.classList.remove('active');
       }, audio.duration * 1000);
+      attachGreetingReplay(audio);
     } catch (e) {
       console.warn('开场白播放失败', e);
     }
+  }
+
+  // 开场白结束后也给一个重听：刚接通没听清第一句是最常见的情况
+  function attachGreetingReplay(audio) {
+    const cap = el.captions.lastElementChild;
+    if (!cap || !cap.classList.contains('assistant') || cap.querySelector('.cap-replay')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cap-replay';
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5V5h4.5"/>
+        <path d="M4.6 9.2A8 8 0 1 1 4 13"/></svg><span>${T('重听')}</span>`;
+    btn.title = T('重新播放这一段');
+    btn.onclick = () => {
+      if (S.replay && S.replay.btn === btn) { stopReplay(); return; }
+      stopReplay();
+      try {
+        const ctx = ensurePlayCtx();
+        if (ctx.state === 'suspended') ctx.resume();
+        const src = ctx.createBufferSource();
+        src.buffer = audio;
+        src.connect(S.playGain);
+        src.start();
+        S.replay = { btn, src };
+        btn.classList.add('playing');
+        setReplayLabel(btn, T('播放中…'));
+        src.onended = () => { if (S.replay && S.replay.src === src) stopReplay(); };
+      } catch (e) { toast(T('播放失败') + '：' + e.message, true, 4000); }
+    };
+    cap.appendChild(btn);
   }
 
   // ---------------------------------------------------------------- 采集
@@ -286,12 +458,16 @@
   // ---------------------------------------------------------------- 通话
   function setStatus(html) { el.status.innerHTML = html; }
 
-  async function startCall() {
+  async function startCall(opt = {}) {
     el.call.disabled = true;
-    el.captions.innerHTML = '';                 // 上一通的字幕不带到这一通
+    if (!opt.resume) {
+      el.captions.innerHTML = '';               // 上一通的字幕不带到这一通
+      S.reportLang = UI_EN() ? 'en' : 'zh';     // 挂断后复盘用哪个语言解释
+    }
     S.curUser = S.curAsst = null;
-    S.reportLang = UI_EN() ? 'en' : 'zh';       // 挂断后复盘用哪个语言解释
-    setStatus(T('正在接通…'));
+    S.turnPcm = [];
+    S.turnText = '';
+    setStatus(opt.resume ? T('正在切换语速…') : T('正在接通…'));
     try {
       await startCapture();                        // 先要麦克风权限（必须用户手势）
     } catch (e) {
@@ -314,13 +490,15 @@
         scenario: S.pick.scenario,
         level: S.pick.level,
         provider: S.boot.active.provider,
+        speed: S.speed,              // 语速是会话级参数，建会话时定下
       }));
     };
 
     ws.onmessage = (e) => {
       let m; try { m = JSON.parse(e.data); } catch { return; }
       switch (m.type) {
-        case 'ready':
+        case 'ready': {
+          const wasInCall = S.inCall;
           S.inCall = true; S.muted = false;
           el.call.disabled = false;
           el.call.classList.add('hangup');
@@ -329,20 +507,32 @@
           el.mute.classList.remove('muted');
           document.body.classList.add('in-call');
           setStatus(`<span class="live">●</span> ${T('通话中')}`);
-          playGreeting(m.greeting);
-          S.sessionId = m.session_id;
-          S.t0 = Date.now();
-          S.warned = false;
-          S.limitMs = ((S.boot.ui && S.boot.ui.call_time_limit_min) || 15) * 60000;
-          S.tick = setInterval(tick, 500);
+          // 重连（切语速）时不重放开场白、不重置计时和 sessionId —— 用户还在同一通电话里
+          if (!wasInCall) playGreeting(m.greeting);
+          if (m.session_id && !S.sessionId) S.sessionId = m.session_id;
+          if (!wasInCall) {
+            S.t0 = Date.now();
+            S.warned = false;
+            S.limitMs = ((S.boot.ui && S.boot.ui.call_time_limit_min) || 15) * 60000;
+            clearInterval(S.tick);
+            S.tick = setInterval(tick, 500);
+          }
           setChipsEnabled(false);
           const tips = $('idle-tips'); if (tips) tips.classList.add('hide');
+          if (typeof m.speed === 'string' && m.speed !== S.speed) {
+            S.speed = m.speed;
+            renderSpeed();
+          }
           break;
+        }
 
         case 'audio': {
           const bytes = b64ToBytes(m.pcm);
           const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
-          playPcm(i16, m.rate || 24000);
+          S.rate = m.rate || 24000;
+          // 攒下这一轮的原始 PCM：用来做「重听」，不占后端带宽也不调模型
+          if (S.turnPcm.length < 3000) S.turnPcm.push(bytes.slice());
+          playPcm(i16, S.rate);
           el.wrap.classList.add('active');
           el.avatar.classList.add('speaking');
           clearTimeout(S._spk);
@@ -355,11 +545,18 @@
 
         case 'user_speech_started':
           stopAllPlayback();          // 打断：立刻静音，用户感知必须即时
+          stopReplay();
           el.avatar.classList.remove('speaking');
           break;
 
         case 'caption':
           setCaption(m.role, m.text, !!m.final);
+          if (m.role === 'assistant') S.turnText = m.text || S.turnText;
+          break;
+
+        case 'turn_end':
+          // AI 这一轮说完 → 字幕气泡上挂「重听」
+          if (m.role === 'assistant') attachReplay();
           break;
 
         case 'error':
@@ -444,6 +641,23 @@
     if (sid) setTimeout(() => openReport(sid), 400);
   }
 
+  /* 语速是建会话时的参数（豆包 session.create.audio.output.speed）：
+     通话中改语速必须重建会话，否则不会生效 —— 这正是「让它说慢点，
+     过一会儿又恢复」的根源（原来只会在 prompt 里求它）。
+     重连对用户是可接受的：字幕保留，AI 会接着往下聊。 */
+  async function reconnect() {
+    if (!S.inCall) return;
+    const keepCaps = el.captions.childElementCount;
+    // 保留已显示的字幕：不清空 captions，只是换一条 WS
+    S.curUser = S.curAsst = null;
+    try { if (S.ws) S.ws.close(); } catch (e) {}
+    S.ws = null;
+    stopAllPlayback();
+    stopReplay();
+    try { stopCapture(); } catch (e) {}
+    await startCall({ resume: true, keepCaps });
+  }
+
   function tick() {
     const used = Date.now() - S.t0;
     if (S.inCall) {
@@ -488,8 +702,11 @@
         ${e.why ? `<div class="err-why">${esc(e.why)}</div>` : ''}
       </div>`).join('');
 
+    // 生词可点开：音标 / 释义 / 例句 / 词形变化（见 cards.js）
     const words = (rep.new_words || []).map(w =>
-      `<div class="word-chip">${esc(w.word)}<span>${esc(w.meaning)}</span></div>`).join('');
+      `<button type="button" class="word-chip" data-word="${esc(w.word)}"
+               data-meaning="${esc(w.meaning)}" title="${T('点开看音标、例句和词形变化')}">
+         ${esc(w.word)}<span class="zh">${esc(w.meaning)}</span></button>`).join('');
 
     el.rpSub.textContent = `${rep.level ? T('估计水平') + ' ' + rep.level + ' · ' : ''}${(rep.errors || []).length} ${T('处可改进')}`;
     el.rpBody.innerHTML = `
@@ -548,6 +765,14 @@
     toast(S.muted ? T('已静音（AI 还会继续说完）') : T('麦克风已开'), false, 1600);
   };
 
+  if (el.theme) {
+    el.theme.onclick = () => {
+      if (window.THEME) THEME.set(THEME.effective === 'light' ? 'dark' : 'light');
+      else document.documentElement.dataset.theme =
+        document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    };
+  }
+
   el.rpClose.onclick = () => el.rpModal.classList.remove('open');
   el.rpAgain.onclick = () => {
     el.rpModal.classList.remove('open');
@@ -563,6 +788,7 @@
   // 调试出口：控制台里 __sayit 可以直接看通话状态，__openReport(sid) 看某通电话的复盘
   window.__sayit = S;
   window.__openReport = openReport;
+  window.__replay = () => el.captions.querySelectorAll('.cap-replay');
 
   boot().catch(e => {
     setStatus('<span class="err">加载配置失败</span>');

@@ -7,6 +7,7 @@
 <title>SayIt · 通话记录</title>
 <link rel="icon" href="/static/icon.svg" />
 <link rel="stylesheet" href="/static/styles.css" />
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <div class="page">
@@ -16,6 +17,7 @@
       <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
       <h1 style="margin-top:6px">通话记录</h1>
     </div>
+    <div id="theme-host"></div>
     <div id="lang-host"></div>
   </div>
 
@@ -48,8 +50,20 @@
   </div>
 </div>
 
+<!-- 词卡：点复盘里「顺手记住」的词 -->
+<div class="modal" id="word-modal" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div><h3>词卡</h3><div class="sub" id="wc-sub"></div></div>
+      <button class="icon-btn" id="wc-close" title="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="wc-body"></div>
+  </div>
+</div>
+
 <script src="/static/i18n.js"></script>
 <script src="/static/nav.js"></script>
+<script src="/static/cards.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 const T = (s, v) => (window.I18N ? I18N.t(s, v) : s);
@@ -85,8 +99,11 @@ function renderReport(rep) {
       ${e.why ? `<div class="err-why">${esc(e.why)}</div>` : ''}
     </div>`).join('') ||
     `<p class="hint" style="color:var(--ok)">${T('这通没挑出明显错误。')}</p>`;
+  // 生词可点开：音标 / 释义 / 例句 / 词形变化
   const words = (rep.new_words || []).map(w =>
-    `<span class="word-chip">${esc(w.word)}<span>${esc(w.meaning)}</span></span>`).join('');
+    `<button type="button" class="word-chip" data-word="${esc(w.word)}"
+             data-meaning="${esc(w.meaning)}" title="${T('点开看音标、例句和词形变化')}">
+       ${esc(w.word)}<span class="zh">${esc(w.meaning)}</span></button>`).join('');
   return `
     <div style="margin-top:20px;padding-top:18px;border-top:1px solid var(--line)">
       <div class="scores" style="margin-bottom:14px">

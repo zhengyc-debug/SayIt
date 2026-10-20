@@ -7,6 +7,7 @@
 <title>SayIt · 错题本</title>
 <link rel="icon" href="/static/icon.svg" />
 <link rel="stylesheet" href="/static/styles.css" />
+<script src="/static/theme.js"></script>
 </head>
 <body>
 <div class="page">
@@ -16,6 +17,7 @@
       <div class="wordmark sm">Say<span>It</span><i class="dot"></i></div>
       <h1 style="margin-top:6px">错题本</h1>
     </div>
+    <div id="theme-host"></div>
     <div id="lang-host"></div>
   </div>
 
@@ -23,6 +25,13 @@
 
   <h2>错误类型分布 <small>全部</small></h2>
   <div class="card" id="typedist"><div class="empty">加载中…</div></div>
+
+  <h2>生词 <small>顺手记住的词单独一页</small></h2>
+  <a class="sess" href="/words" style="margin-bottom:18px">
+    <div class="meta"><div class="t1">打开生词本</div>
+      <div class="t2">音标 · 释义 · 例句 · 词形变化</div></div>
+    <div class="arr">›</div>
+  </a>
 
   <h2>你说错过的句子 <small id="cnt"></small></h2>
   <p class="sub">下次通话时，AI 会自然地把这些场景再造一遍，让你把正确的说法真正用出去。</p>
