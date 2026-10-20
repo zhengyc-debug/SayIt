@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..services import words as words_svc
 from ..store import db
+from ..store import settings as store
 from .deps import current_user
 
 log = logging.getLogger("sayit.words_api")
@@ -29,18 +30,26 @@ async def word_card(word: str = Query(..., min_length=1, max_length=64),
                     ui_lang: str = "zh",
                     force: bool = False,
                     user: str = Depends(current_user)) -> dict[str, Any]:
-    """取一张词卡。第一次会调文本模型生成并缓存，之后直接返回缓存。"""
-    return await words_svc.card(user, word, ui_lang=ui_lang, force=force)
+    """取一张词卡。
+
+    默认先查免费词典（有道 → dictionaryapi），只有词典都没收录时才落到文本模型；
+    设置里关掉「词卡用大模型」之后，词典查不到就直接报错，不再产生 token 消耗。
+    """
+    allow_llm = bool(store.load_settings(user).get("ui", {}).get("word_card_llm", True))
+    return await words_svc.card(user, word, ui_lang=ui_lang, force=force,
+                                allow_llm=allow_llm)
 
 
 @router.post("/words/card")
 async def regenerate_word_card(payload: dict[str, Any],
                                user: str = Depends(current_user)) -> dict[str, Any]:
+    """强制重查（忽略缓存）。前端「换个来源重查」用的就是这里。"""
     word = str(payload.get("word") or "").strip()
     if not word:
         raise HTTPException(400, "缺少 word")
+    allow_llm = bool(store.load_settings(user).get("ui", {}).get("word_card_llm", True))
     return await words_svc.card(user, word, ui_lang=str(payload.get("ui_lang") or "zh"),
-                                force=True)
+                                force=True, allow_llm=allow_llm)
 
 
 @router.delete("/words/{word}")

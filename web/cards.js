@@ -58,6 +58,22 @@
     },
   };
 
+  // 数据来源：让用户能判断这张卡靠不靠谱（有道词典 / 开源词典 / 模型兜底）
+  const SOURCE_LABEL = {
+    youdao: '有道词典',
+    dictapi: 'Wiktionary · dictionaryapi.dev',
+    llm: '大模型兜底',
+  };
+
+  function sourceNote(src) {
+    if (!src) return '';
+    const label = SOURCE_LABEL[src] || src;
+    const hint = src === 'youdao' ? T('免费词典，不消耗 token')
+      : src === 'llm' ? T('词典没收录才用模型，会消耗少量 token')
+        : T('免费开源词典');
+    return `<div class="wc-source">${T('数据来源')}：${label} · ${hint}</div>`;
+  }
+
   function renderCard(data) {
     const c = data.card;
     const word = data.word || c.word;
@@ -96,8 +112,22 @@
       <div class="wc-actions">
         <button class="btn sm" id="wc-speak-word">🔊 ${T('读单词')}</button>
         <button class="btn sm" id="wc-speak-ex">🗣 ${T('读例句')}</button>
-        ${data.cached === false ? '' : `<button class="btn sm" id="wc-regen">${T('重新生成')}</button>`}
-      </div>`;
+        <button class="btn sm" id="wc-regen">${T('换个来源重查')}</button>
+      </div>
+      ${sourceNote(c.source)}`;
+  }
+
+  // 词典给的真人发音（有道 dictvoice / Wiktionary mp3）；没有才退回浏览器 TTS
+  let AUDIO = null;
+  function playAudio(url) {
+    if (!url) return false;
+    try {
+      if (!AUDIO) AUDIO = new Audio();
+      AUDIO.pause();
+      AUDIO.src = url;
+      AUDIO.play().catch(() => {});   // 播放失败时调用方会退回浏览器 TTS
+      return true;
+    } catch (e) { return false; }
   }
 
   function bindActions(data) {
@@ -105,7 +135,9 @@
     const w = document.getElementById('wc-speak-word');
     const ex = document.getElementById('wc-speak-ex');
     const rg = document.getElementById('wc-regen');
-    if (w) w.onclick = () => SPEAK.say(data.word || c.word, 'en-US');
+    if (w) w.onclick = () => {
+      if (!(c.audio && playAudio(c.audio))) SPEAK.say(data.word || c.word, 'en-US');
+    };
     if (ex) ex.onclick = () => {
       const s = (c.examples || [])[0];
       if (s) SPEAK.say(s.en, 'en-US');
@@ -155,7 +187,8 @@
       if (sub) {
         sub.textContent = [r.card.pos, r.meaning || ''].filter(Boolean).join(' · ');
       }
-      body.innerHTML = renderCard({ ...r, word });
+      const src = r.source || (r.card && r.card.source) || '';
+      body.innerHTML = renderCard({ ...r, word, card: { ...r.card, source: src } });
       bindActions({ ...r, word });
       if (window.I18N) I18N.apply(body);
     } catch (e) {

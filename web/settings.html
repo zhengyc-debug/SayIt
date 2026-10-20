@@ -62,6 +62,27 @@
   <p class="sub" id="provider-summary" style="margin-top:-4px"></p>
   <div id="providers"></div>
 
+  <h2>生词卡</h2>
+  <div class="card tight">
+    <div class="card-head">
+      <span class="name">数据来源</span>
+      <span class="badge ok" style="margin-left:auto">免费词典优先</span>
+    </div>
+    <p class="hint" style="margin:8px 0 0">
+      点开生词时先查免费词典（有道 web 词典 → Wiktionary），音标、释义、例句、词形变化都从这里来，
+      <b>不消耗 token</b>。只有词典完全没收录的词，才会退到复盘用的文本模型。
+    </p>
+    <div class="row" style="margin-top:12px">
+      <label class="field" style="flex:1 1 200px">
+        词典没收录时用文本模型兜底
+        <select id="s-wc-llm">
+          <option value="true">允许兜底</option>
+          <option value="false">不兜底（完全不花 token）</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
   <h2>复盘用文本模型</h2>
   <p class="sub">挂断后生成复盘报告用的 LLM，任何 OpenAI 兼容端点都行（DeepSeek / 方舟 / 百炼 / OpenAI）。</p>
   <div class="card" id="llm-card">

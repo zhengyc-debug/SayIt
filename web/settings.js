@@ -48,6 +48,13 @@
     renderLevels(a.level);
     renderSpeeds();
     renderTheme();
+    renderWordCard();
+  }
+
+  function renderWordCard() {
+    const sel = $('s-wc-llm');
+    if (!sel) return;
+    sel.value = String((boot.ui && boot.ui.word_card_llm) !== false);
   }
 
   function renderLevels(pick) {
@@ -226,7 +233,11 @@
         assistant_name: $('s-name').value.trim(),
       },
       // 语速：默认通话语速（通话页那一排的默认值，也是通话中不选时用的档）
-      ui: { speech_speed: $('s-speed') ? $('s-speed').value : undefined },
+      // word_card_llm：生词卡在词典都没收录时是否用文本模型兜底
+      ui: {
+        speech_speed: $('s-speed') ? $('s-speed').value : undefined,
+        word_card_llm: $('s-wc-llm') ? $('s-wc-llm').value === 'true' : undefined,
+      },
       providers,
     };
   }

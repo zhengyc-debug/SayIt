@@ -72,6 +72,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         # 实测取 -50/0/50/100 时同一句话的音频长度约 14s / 8s / 4.5s / 3.6s。
         # 默认 -30：练口语时宁可慢一点听清楚。调了就一直生效，不用每次让 AI"说慢点"。
         "speech_speed": "slow",
+        # 词卡数据源：默认只用免费词典（有道 web 词典 → dictionaryapi.dev）。
+        # 词典都没收录时是否再用文本模型兜底 —— 关掉就完全不吃 token。
+        "word_card_llm": True,
     },
 }
 

@@ -1216,3 +1216,10 @@ a.sess { color: inherit; text-decoration: none; }
 .word-chip:hover { border-color: var(--accent-line); }
 .word-chip .zh { color: var(--fg-3); margin-left: 6px; font-size: 12px; }
 .word-chip .zh::before { content: '· '; opacity: .6; }
+.wc-source {
+  margin-top: 14px;
+  font-size: 11.5px;
+  color: var(--fg-3);
+  line-height: 1.6;
+}
+.wc-source::before { content: '✓ '; color: var(--ok); }
