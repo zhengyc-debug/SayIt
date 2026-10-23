@@ -24,6 +24,7 @@ from ..store import db
 from ..store import settings as store_settings
 from ..languages import get_language
 from .llm import LLMError, chat, conf_for
+from . import mistake_rules
 
 log = logging.getLogger("sayit.review")
 
@@ -202,6 +203,8 @@ def _build_messages(turns: list[dict[str, Any]], language: str, level: str,
         if meta.get("total_turns"):
             parts.append(f"The full call is {meta['total_turns']} lines "
                          f"({meta.get('minutes', 0)} min of speech). Every line is included below.")
+    if meta and meta.get("rules_block"):
+        parts.append(meta["rules_block"])
     if digest and digest.get("prefindings"):
         d = digest["prefindings"]
         if d.get("errors"):
@@ -367,12 +370,16 @@ async def generate(user: str, session_id: str, force: bool = False,
         log.info("复盘 %s 分块扫描 %d/%d 块，候选错误 %d 条", session_id,
                  len(scans), len(chunks), len(prefindings.get("errors") or []))
 
+    # 用户删过的同类错题 → 已学到的规则：进 prompt，让模型一开始就别记这类问题
+    rules_block = mistake_rules.rules_prompt_block(user)
+
     minutes = round((row.get("duration_ms") or 0) / 60000)
     messages = _build_messages(turns, row.get("language") or "en",
                               row.get("level") or "B1", ui_lang=ui_lang,
                               digest={"prefindings": prefindings} if prefindings else None,
                               meta={"continuation": bool(parent_id) and parent_id != session_id,
                                     "includes_parent": scope_note == "continued",
+                                    "rules_block": rules_block,
                                     "total_turns": len([t for t in turns
                                                         if (t.get("text") or "").strip()]),
                                     "minutes": minutes})
@@ -390,6 +397,13 @@ async def generate(user: str, session_id: str, force: bool = False,
         raise LLMError("模型没有返回合法 JSON，可以点『重新生成』再试一次")
 
     payload = _normalize(raw)
+    # prompt 求过一遍还不够：模型在长转录里常常照记。这里按规则做一次硬过滤，
+    # 被剔掉的照样入库（hidden=1 + rule_id），用户在错题本里能恢复。
+    kept, dropped = mistake_rules.filter_errors(user, payload["errors"])
+    if dropped:
+        payload["filtered_by_rules"] = [
+            {"you_said": e.get("you_said"), "rule_id": rid} for e, rid in dropped]
+        payload["errors"] = kept
     payload["generated_at"] = time.time()
     payload["model"] = llm_conf.get("model", "")
     payload["ui_lang"] = ui_lang      # 这份解释是用哪种母语写的
@@ -405,6 +419,10 @@ async def generate(user: str, session_id: str, force: bool = False,
     }
     db.save_report(user, session_id, payload)
     db.replace_errors(user, session_id, payload["errors"])
+    # 被规则移出的也存下来，只是看不见；删错了可以恢复
+    if dropped:
+        db.replace_errors(user, session_id, [e for e, _ in dropped],
+                          hidden=True, rule_map={id(e): rid for e, rid in dropped})
     # 复盘里的生词顺手进生词本：用户不用再手动收藏一次
     try:
         db.add_words(user, session_id, payload["new_words"], ui_lang=ui_lang)

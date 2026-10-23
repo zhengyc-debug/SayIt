@@ -26,18 +26,20 @@
   <h2>错误类型分布 <small>全部</small></h2>
   <div class="card" id="typedist"><div class="empty">加载中…</div></div>
 
-  <h2>生词 <small>顺手记住的词单独一页</small></h2>
-  <a class="sess" href="/words" style="margin-bottom:18px">
-    <div class="meta"><div class="t1">打开生词本</div>
-      <div class="t2">音标 · 释义 · 例句 · 词形变化</div></div>
-    <div class="arr">›</div>
-  </a>
+  <!-- AI 从「你删了什么」里学到的偏好：只影响以后记不记，已经学过的内容不受影响 -->
+  <h2>不再记录的类型 <small>AI 从你的删除里学到的</small></h2>
+  <p class="sub">
+    删掉某类错题两次以上，AI 会归纳成一条规则，之后复盘不再把这类问题记进来
+    （比如 um / uh 这种思考语气词）。删掉规则，被它移出的错题会回来。
+  </p>
+  <div class="card tight" id="rules"><div class="empty">加载中…</div></div>
 
   <div class="h2row">
     <h2>你说错过的句子 <small id="cnt"></small></h2>
     <button class="btn sm danger" id="wipe">清空错题本</button>
   </div>
-  <p class="sub">下次通话时，AI 会自然地把这些场景再造一遍，让你把正确的说法真正用出去。</p>
+  <p class="sub">下次通话时，AI 会自然地把这些场景再造一遍，让你把正确的说法真正用出去。
+    判定不准的那条，点右侧 ✕ 移出去即可 —— 同类删多了它会自己学会不再记。</p>
   <div class="card" id="mistakes"></div>
 </div>
 
@@ -50,23 +52,37 @@ const TYPE = { grammar: '语法', tense: '时态', word: '用词', order: '语�
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-(async () => {
-  const [st, er] = await Promise.all([
-    (await fetch('/api/stats')).json(),
-    (await fetch('/api/errors?limit=80')).json(),
+let errors = [];
+let rules = [];
+let counts = {};
+let stats = {};
+
+async function loadAll() {
+  const [er, rl] = await Promise.all([
+    fetch('/api/errors?limit=200').then(r => r.json()),
+    fetch('/api/error-rules').then(r => r.json()),
   ]);
+  errors = er.errors || [];
+  counts = er.counts || rl.counts || {};
+  rules = (rl.rules || []).filter(r => (r.rule || '').trim());
+  renderNums(); renderTypes(); renderRules(); renderMistakes();
+  if (window.I18N) { I18N.apply(document.body); I18N.mountSwitch($('lang-host')); }
+}
 
-  const mins = Math.round((st.duration_ms || 0) / 60000);
+function renderNums() {
+  const mins = Math.round((stats.duration_ms || 0) / 60000);
   $('nums').innerHTML = [
-    ['通话次数', st.sessions || 0],
-    ['累计时长', `${mins}<small>${mins >= 60 ? '分' : '分'}</small>`],
-    ['复盘报告', st.reports || 0],
-    ['累计错误', (er.errors || []).length],
+    ['通话次数', stats.sessions || 0],
+    ['累计时长', `${mins}<small>分</small>`],
+    ['复盘报告', stats.reports || 0],
+    ['累计错误', counts.visible != null ? counts.visible : errors.length],
   ].map(([k, v]) => `<div class="num"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+}
 
-  const counts = {};
-  for (const e of (er.errors || [])) counts[e.type] = (counts[e.type] || 0) + 1;
-  const types = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+function renderTypes() {
+  const c = {};
+  for (const e of errors) c[e.type] = (c[e.type] || 0) + 1;
+  const types = Object.entries(c).sort((a, b) => b[1] - a[1]);
   const max = Math.max(1, ...types.map(t => t[1]));
   $('typedist').innerHTML = types.length
     ? `<div style="display:flex;flex-direction:column;gap:10px">` + types.map(([t, n]) => `
@@ -76,30 +92,100 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
           <span class="n">${n}</span>
         </div>`).join('') + '</div>'
     : '<div class="empty">还没有错误记录，打完一通电话并生成复盘后会出现。</div>';
+}
 
-  const list = er.errors || [];
-  $('cnt').textContent = list.length ? T('{n} 条', { n: list.length }) : '';
-  $('mistakes').innerHTML = list.length
-    ? list.map(e => `
+/* 「不再记录的类型」：AI 从用户删掉的错题里归纳出的规则。
+   删掉规则 = 这条偏好作废，被它移出的错题会回到下面的列表。 */
+function renderRules() {
+  const host = $('rules');
+  if (!rules.length) {
+    const removed = counts.hidden || 0;
+    host.innerHTML = `<div class="empty" style="padding:18px 0">
+      ${T('还没学到规则。')}<br>
+      <span style="font-size:12px">${removed
+        ? T('已经移出 {n} 条错题，同类再多删一条就能归纳出规则。', { n: removed })
+        : T('在下面删掉不认同的错题，同类删两次之后这里会出现规则。')}</span>
+      <div style="margin-top:10px"><button class="btn sm" id="learn">${T('现在就归纳一次')}</button></div>
+    </div>`;
+    $('learn').onclick = learnNow;
+    return;
+  }
+  host.innerHTML = rules.map(r => `
+    <div class="rule">
+      <div class="rt"><span class="r-txt">${esc(r.rule)}</span>
+        ${r.pattern ? `<span class="r-pat">${esc(r.pattern)}</span>` : ''}</div>
+      <div class="r-sub">${r.hits ? T('已帮你挡掉 {n} 条', { n: r.hits }) : T('规则已生效')}</div>
+      <button class="card-del" data-rule="${r.id}" title="${T('删掉这条规则')}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>`).join('');
+  host.querySelectorAll('[data-rule]').forEach(b => {
+    b.onclick = async () => {
+      b.disabled = true;
+      await fetch('/api/error-rules/' + b.dataset.rule, { method: 'DELETE' }).catch(() => {});
+      await loadAll();
+    };
+  });
+}
+
+function renderMistakes() {
+  $('cnt').textContent = errors.length ? T('{n} 条', { n: errors.length }) : '';
+  $('mistakes').innerHTML = errors.length
+    ? errors.map(e => `
         <div class="mistake">
           <div><span class="said">${esc(e.you_said)}</span>
                <span style="color:var(--fg-3)">→</span>
                <span class="better">${esc(e.better)}</span>
                <span class="type-badge">${T(TYPE[e.type] || e.type)}</span></div>
           ${e.why ? `<div class="why">${esc(e.why)}</div>` : ''}
+          <button class="card-del" data-err="${e.id}" title="${T('移出错题本')}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </div>`).join('')
     : '<div class="empty">错题本是空的。</div>';
-  // 清空错题本：点了就清，不做二次确认
-  $('wipe').onclick = async () => {
-    const btn = $('wipe');
-    btn.disabled = true;
-    const r = await fetch('/api/errors', { method: 'DELETE' }).then(x => x.json()).catch(() => ({}));
-    btn.disabled = false;
-    if (!r.ok) { alert(T('清空失败，再试一次')); return; }
-    location.reload();
-  };
 
-  if (window.I18N) { I18N.apply(document.body); I18N.mountSwitch($('lang-host')); }
+  // 单条移出：不弹确认（用户要求点了就删）。删除会触发后台归纳，
+  // 所以等一下再刷新，让刚学到的规则当场出现。
+  $('mistakes').querySelectorAll('[data-err]').forEach(b => {
+    b.onclick = async () => {
+      const node = b.closest('.mistake');
+      b.disabled = true;
+      if (node) node.classList.add('going');
+      const r = await fetch('/api/errors/' + b.dataset.err, { method: 'DELETE' })
+        .then(x => x.json()).catch(() => ({}));
+      if (!r.ok) {
+        b.disabled = false;
+        if (node) node.classList.remove('going');
+        return;
+      }
+      await new Promise(res => setTimeout(res, 900));
+      await loadAll();
+    };
+  });
+}
+
+async function learnNow() {
+  const btn = $('learn');
+  if (btn) { btn.disabled = true; btn.textContent = T('归纳中…'); }
+  await fetch('/api/error-rules/learn', { method: 'POST' }).catch(() => {});
+  await loadAll();
+}
+
+// 清空错题本：点了就清，不做二次确认
+$('wipe').onclick = async () => {
+  const btn = $('wipe');
+  btn.disabled = true;
+  const r = await fetch('/api/errors', { method: 'DELETE' }).then(x => x.json()).catch(() => ({}));
+  btn.disabled = false;
+  if (!r.ok) { alert(T('清空失败，再试一次')); return; }
+  await loadAll();
+};
+
+(async () => {
+  stats = await fetch('/api/stats').then(r => r.json()).catch(() => ({}));
+  await loadAll();
 })().catch(e => {
   $('mistakes').innerHTML = `<div class="empty" style="color:#ffb3b3">加载失败：${esc(e.message)}</div>`;
 });

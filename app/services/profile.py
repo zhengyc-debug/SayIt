@@ -99,6 +99,16 @@ def prompt_hint(user: str, language: str, selected_level: str) -> str:
     if notes:
         lines.append(f"Things the learner told you about themselves: {notes[:300]}")
 
+    # 错题偏好（AI 从「用户删了什么错题」里学到的规则）：通话时也别在这些点上
+    # 刻意挖坑或反复暗示 —— 用户明确表示这些不算他要练的东西。
+    try:
+        from . import mistake_rules
+        block = mistake_rules.rules_prompt_block(user)
+        if block:
+            lines.append("Correction policy for this learner:\n" + block)
+    except Exception:
+        pass
+
     if not lines:
         return ""
     return "## What you know about this learner (private, never mention it)\n" + \

@@ -121,6 +121,18 @@
     '删除中…': 'Deleting…',
     '删除失败，再试一次': 'Delete failed — try again',
     '清空失败，再试一次': 'Could not clear — try again',
+    '从生词本删除': 'Remove from wordbook',
+    '移出错题本': 'Remove from mistakes',
+    '还没学到规则。': 'No learned rules yet.',
+    '已经移出 {n} 条错题，同类再多删一条就能归纳出规则。':
+      '{n} correction(s) removed — one more of the same kind and a rule can be learned.',
+    '在下面删掉不认同的错题，同类删两次之后这里会出现规则。':
+      'Remove corrections you disagree with below; after two of the same kind a rule appears here.',
+    '现在就归纳一次': 'Learn from my removals now',
+    '归纳中…': 'Learning…',
+    '删掉这条规则': 'Delete this rule',
+    '已帮你挡掉 {n} 条': 'Blocked {n} correction(s)',
+    '规则已生效': 'Rule active',
     '单次通话最长': 'Call limit',
 
     // 提示 / toast

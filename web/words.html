@@ -77,13 +77,39 @@ function render() {
     const card = w.card || {};
     const ph = card.phonetic_us || card.phonetic_uk || '';
     const label = card.meaning || w.meaning || '';
-    return `<button type="button" class="wordcard" data-word="${esc(w.word)}"
+    // 删除放在卡片外面（右上角悬浮的 ⋯ 图标），不用先点开词卡再看一遍才能删
+    return `<div class="wordcell">
+      <button type="button" class="wordcard" data-word="${esc(w.word)}"
               data-meaning="${esc(label)}">
         <div class="w">${esc(w.word)}</div>
         <div class="ph">${esc(ph)}</div>
         <div class="mn">${esc(label)}</div>
-      </button>`;
+      </button>
+      <button type="button" class="card-del" data-del="${esc(w.word)}"
+              title="${T('从生词本删除')}" aria-label="${T('从生词本删除')}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>`;
   }).join('') + `</div>`;
+  // 卡片外的删除按钮：点一下就删（不弹确认），顺手把卡片淡出，避免闪一下整页重排
+  list.querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const word = btn.dataset.del;
+      const cell = btn.closest('.wordcell');
+      btn.disabled = true;
+      if (cell) cell.classList.add('going');
+      const r = await fetch('/api/words/' + encodeURIComponent(word), { method: 'DELETE' })
+        .then(x => x.json()).catch(() => ({}));
+      if (!r.ok) {
+        btn.disabled = false;
+        if (cell) cell.classList.remove('going');
+        return;
+      }
+      await load();
+    };
+  });
   if (window.I18N) I18N.apply(list);
 }
 

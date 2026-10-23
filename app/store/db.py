@@ -70,6 +70,22 @@ CREATE TABLE IF NOT EXISTS profile (
 
 -- 「顺手记住」的生词本。每个词一张卡：音标 / 释义 / 例句 / 词形变化。
 -- payload 存整份卡片 JSON（由 LLM 生成后缓存），ui_lang 记录解释用的是哪种母语。
+-- 错题偏好：用户反复删掉同一类错题后，AI 归纳出的一条规则。
+-- 例：「用 uh / um 这类思考语气词不算错」→ pattern 命中后这通不再记进错题本。
+-- 记录的是「为什么不该记」，所以下次复盘和错题本都会遵守它。
+CREATE TABLE IF NOT EXISTS error_rules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user        TEXT NOT NULL DEFAULT '',
+    rule        TEXT NOT NULL,              -- 中文一句话，直接注入 prompt
+    pattern     TEXT DEFAULT '',            -- 英文关键词/短语，用逗号分隔，用于命中
+    evidence    TEXT,                       -- 支撑这条规则的原始 you_said 列表（JSON）
+    hits        INTEGER DEFAULT 0,          -- 因为这条规则被清掉的错题数
+    source      TEXT DEFAULT 'auto',        -- auto = 从删除行为学的；manual = 用户写的
+    created_at  REAL NOT NULL,
+    updated_at  REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_error_rules_user_rule ON error_rules(user, rule);
+
 CREATE TABLE IF NOT EXISTS words (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user        TEXT NOT NULL DEFAULT '',
@@ -86,7 +102,9 @@ CREATE TABLE IF NOT EXISTS words (
 _ADD_COLUMNS = {
     "sessions": [("user", "TEXT NOT NULL DEFAULT ''")],
     "reports": [("user", "TEXT NOT NULL DEFAULT ''")],
-    "errors": [("user", "TEXT NOT NULL DEFAULT ''")],
+    "errors": [("user", "TEXT NOT NULL DEFAULT ''"),
+               ("hidden", "INTEGER DEFAULT 0"),      # 1 = 被偏好规则移出错题本
+               ("rule_id", "INTEGER")],              # 是哪条规则移出的
 }
 
 
@@ -256,6 +274,97 @@ def delete_session(user: str, session_id: str) -> bool:
     return True
 
 
+def hide_error(user: str, error_id: int, rule_id: int | None = None) -> dict[str, Any] | None:
+    """把一条错题移出错题本（不物理删除，删错了还能恢复）。
+
+    返回被隐藏的那条，调用方拿它去喂「偏好学习」。
+    """
+    with _lock, _conn() as c:
+        row = c.execute("SELECT * FROM errors WHERE id=? AND user=?",
+                        (int(error_id), user)).fetchone()
+        if not row:
+            return None
+        c.execute("UPDATE errors SET hidden=1, rule_id=? WHERE id=? AND user=?",
+                  (rule_id, int(error_id), user))
+        if rule_id:
+            c.execute("UPDATE error_rules SET hits = hits + 1, updated_at=? WHERE id=?",
+                      (time.time(), rule_id))
+    return dict(row)
+
+
+def restore_error(user: str, error_id: int) -> bool:
+    with _lock, _conn() as c:
+        cur = c.execute("UPDATE errors SET hidden=0, rule_id=NULL WHERE id=? AND user=?",
+                        (int(error_id), user))
+        return (cur.rowcount or 0) > 0
+
+
+def list_rules(user: str) -> list[dict[str, Any]]:
+    with _lock, _conn() as c:
+        rows = c.execute(
+            "SELECT id, rule, pattern, evidence, hits, source, created_at, updated_at"
+            " FROM error_rules WHERE user=? ORDER BY id DESC", (user,)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["evidence"] = json.loads(d.get("evidence") or "[]")
+        except Exception:
+            d["evidence"] = []
+        out.append(d)
+    return out
+
+
+def save_rule(user: str, rule: str, pattern: str = "", evidence: list[str] | None = None,
+              source: str = "auto") -> int:
+    """写入一条偏好规则（同一条规则不会重复存）。返回规则 id。"""
+    rule = (rule or "").strip()
+    if not rule:
+        return 0
+    now = time.time()
+    with _lock, _conn() as c:
+        row = c.execute("SELECT id FROM error_rules WHERE user=? AND rule=?",
+                        (user, rule)).fetchone()
+        ev = json.dumps(list(evidence or []), ensure_ascii=False)
+        if row:
+            c.execute("UPDATE error_rules SET pattern=?, evidence=?, updated_at=?"
+                      " WHERE id=?", (pattern, ev, now, row["id"]))
+            return int(row["id"])
+        cur = c.execute(
+            "INSERT INTO error_rules (user, rule, pattern, evidence, hits, source,"
+            " created_at, updated_at) VALUES (?,?,?,?,0,?,?,?)",
+            (user, rule, pattern, ev, source, now, now))
+        return int(cur.lastrowid)
+
+
+def delete_rule(user: str, rule_id: int) -> bool:
+    """删掉一条偏好规则（用户不认同 AI 归纳的规则时用）。
+
+    规则没了，它代表的「这类不该记」也就不成立，所以：
+      · 被这条规则自动挡掉的错题（rule_id=它）恢复；
+      · 当初促生这条规则的那些手动删除（hidden=0 且没挂规则）也一起恢复 ——
+        那是规则的学习证据，规则作废了证据也就不该继续生效。
+    """
+    with _lock, _conn() as c:
+        row = c.execute("SELECT evidence FROM error_rules WHERE id=? AND user=?",
+                        (int(rule_id), user)).fetchone()
+        if not row:
+            return False
+        c.execute("DELETE FROM error_rules WHERE id=? AND user=?", (int(rule_id), user))
+        c.execute("UPDATE errors SET hidden=0, rule_id=NULL WHERE user=? AND rule_id=?",
+                  (user, int(rule_id)))
+        # 学习证据恢复：这些 you_said 是当初被手动删掉、用来归纳规则的句子
+        try:
+            evidence = json.loads(row["evidence"] or "[]")
+        except Exception:
+            evidence = []
+        for said in evidence:
+            c.execute("UPDATE errors SET hidden=0 WHERE user=? AND COALESCE(hidden,0)=1"
+                      " AND rule_id IS NULL AND you_said=?",
+                      (user, str(said or "")))
+    return True
+
+
 def delete_all_errors(user: str) -> int:
     with _lock, _conn() as c:
         cur = c.execute("DELETE FROM errors WHERE user=?", (user,))
@@ -330,16 +439,28 @@ def get_report(session_id: str) -> dict[str, Any] | None:
         return None
 
 
-def replace_errors(user: str, session_id: str, errors: list[dict[str, Any]]) -> None:
+def replace_errors(user: str, session_id: str, errors: list[dict[str, Any]],
+                   hidden: bool = False,
+                   rule_map: dict[int, int] | None = None) -> None:
+    """重写这通的错题（复盘重算时先清后写）。
+
+    hidden=True 时这些错题只是「存档」：错题本不显示，但保留 rule_id，
+    用户不认同规则、把规则删掉时能原样恢复回来。
+    """
     with _lock, _conn() as c:
-        c.execute("DELETE FROM errors WHERE session_id=?", (session_id,))
+        if not hidden:      # 重算时只清可见的那些，已被规则移出的存档保留
+            c.execute("DELETE FROM errors WHERE session_id=? AND COALESCE(hidden,0)=0",
+                      (session_id,))
         now = time.time()
+        rows = []
+        for e in errors:
+            rid = (rule_map or {}).get(id(e))
+            rows.append((session_id, user, e.get("you_said", ""), e.get("better", ""),
+                         e.get("why", ""), e.get("type", "grammar"), 1 if hidden else 0,
+                         rid, now))
         c.executemany(
-            "INSERT INTO errors (session_id, user, you_said, better, why, type, ts)"
-            " VALUES (?,?,?,?,?,?,?)",
-            [(session_id, user, e.get("you_said", ""), e.get("better", ""),
-              e.get("why", ""), e.get("type", "grammar"), now) for e in errors],
-        )
+            "INSERT INTO errors (session_id, user, you_said, better, why, type,"
+            " hidden, rule_id, ts) VALUES (?,?,?,?,?,?,?,?,?)", rows)
 
 
 def error_type_stats(user: str, limit_sessions: int = 6) -> dict[str, int]:
@@ -354,11 +475,37 @@ def error_type_stats(user: str, limit_sessions: int = 6) -> dict[str, int]:
 
 
 def top_errors(user: str, limit: int = 50) -> list[dict[str, Any]]:
+    """错题本列表。被偏好规则移出的（hidden=1）不返回 —— 那正是「不再记录」的意思。"""
     with _lock, _conn() as c:
         rows = c.execute(
-            "SELECT e.you_said, e.better, e.why, e.type, e.ts, s.started_at"
+            "SELECT e.id, e.you_said, e.better, e.why, e.type, e.ts, s.started_at,"
+            " e.session_id"
             " FROM errors e JOIN sessions s ON s.id = e.session_id"
-            " WHERE e.user=? ORDER BY e.ts DESC LIMIT ?", (user, limit)).fetchall()
+            " WHERE e.user=? AND COALESCE(e.hidden,0)=0"
+            " ORDER BY e.ts DESC LIMIT ?", (user, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def error_counts(user: str) -> dict[str, int]:
+    """错题本的三个数：可见 / 被规则移出 / 规则条数。"""
+    with _lock, _conn() as c:
+        vis = c.execute("SELECT COUNT(*) n FROM errors WHERE user=? AND COALESCE(hidden,0)=0",
+                        (user,)).fetchone()["n"]
+        hid = c.execute("SELECT COUNT(*) n FROM errors WHERE user=? AND COALESCE(hidden,0)=1",
+                        (user,)).fetchone()["n"]
+        rules = c.execute("SELECT COUNT(*) n FROM error_rules WHERE user=?",
+                          (user,)).fetchone()["n"]
+    return {"visible": int(vis), "hidden": int(hid), "rules": int(rules)}
+
+
+def recent_hidden(user: str, days: int = 30, limit: int = 40) -> list[dict[str, Any]]:
+    """最近被用户手动移出的错题（不带规则的），这些是「偏好学习」的输入。"""
+    since = time.time() - days * 86400
+    with _lock, _conn() as c:
+        rows = c.execute(
+            "SELECT you_said, better, type, why FROM errors"
+            " WHERE user=? AND COALESCE(hidden,0)=1 AND rule_id IS NULL AND ts>=?"
+            " ORDER BY ts DESC LIMIT ?", (user, since, limit)).fetchall()
     return [dict(r) for r in rows]
 
 

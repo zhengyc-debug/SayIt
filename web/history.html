@@ -44,11 +44,10 @@
       <div class="turn-list" id="d-turns"></div>
       <div id="rp-host"></div>
     </div>
+    <!-- 关闭走右上角的 ✕；「再练一次」已去掉（记录页只负责回溯，不再这里起新通话） -->
     <div class="modal-foot">
       <button class="btn" id="d-del" style="color:var(--err-ink);margin-right:auto">删除</button>
       <button class="btn primary" id="d-continue">继续这通电话</button>
-      <a class="btn" id="d-again" href="/">再练一次</a>
-      <button class="btn" id="d-close2">关闭</button>
     </div>
   </div>
 </div>
@@ -204,9 +203,6 @@ async function loadDetail(id) {
     </div>`).join('') || `<p class="hint">${T('这通电话没有留下文本。')}</p>`;
   $('d-turns').innerHTML = turns;
 
-  $('d-again').href = `/?scenario=${encodeURIComponent(d.scenario || '')}` +
-    `&level=${encodeURIComponent(d.level || '')}` +
-    `&language=${encodeURIComponent(d.language || '')}`;
   setContinueState(d);
 
   // 删除：二次确认放在同一个弹层里（不用 window.confirm —— 手机上是两套不同的原生框，
@@ -315,7 +311,6 @@ $('pg-next').onclick = () => {
 };
 
 $('d-close').onclick = closeDetail;
-$('d-close2').onclick = closeDetail;
 $('detail-modal').addEventListener('click', (e) => {
   if (e.target === $('detail-modal')) closeDetail();
 });
