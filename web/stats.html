@@ -33,7 +33,10 @@
     <div class="arr">›</div>
   </a>
 
-  <h2>你说错过的句子 <small id="cnt"></small></h2>
+  <div class="h2row">
+    <h2>你说错过的句子 <small id="cnt"></small></h2>
+    <button class="btn sm danger" id="wipe">清空错题本</button>
+  </div>
   <p class="sub">下次通话时，AI 会自然地把这些场景再造一遍，让你把正确的说法真正用出去。</p>
   <div class="card" id="mistakes"></div>
 </div>
@@ -86,6 +89,16 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
           ${e.why ? `<div class="why">${esc(e.why)}</div>` : ''}
         </div>`).join('')
     : '<div class="empty">错题本是空的。</div>';
+  // 清空错题本：点了就清，不做二次确认
+  $('wipe').onclick = async () => {
+    const btn = $('wipe');
+    btn.disabled = true;
+    const r = await fetch('/api/errors', { method: 'DELETE' }).then(x => x.json()).catch(() => ({}));
+    btn.disabled = false;
+    if (!r.ok) { alert(T('清空失败，再试一次')); return; }
+    location.reload();
+  };
+
   if (window.I18N) { I18N.apply(document.body); I18N.mountSwitch($('lang-host')); }
 })().catch(e => {
   $('mistakes').innerHTML = `<div class="empty" style="color:#ffb3b3">加载失败：${esc(e.message)}</div>`;

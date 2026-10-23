@@ -215,6 +215,9 @@ def mask_key(key: str | None) -> str:
 def public_settings(username: str) -> dict[str, Any]:
     """给前端的版本：任何 api_key 都必须是掩码。"""
     s = deepcopy(load_settings(username))
+    # 通话时长上限是服务端规则：无论用户配置里存了什么（老版本默认 15），
+    # 下发给前端的都只能是常量值。
+    s.setdefault("ui", {})["call_time_limit_min"] = call_time_limit_min(s)
     slots = list(s.get("providers", {}).items())
     if isinstance(s.get("llm"), dict):
         slots.append(("llm", s["llm"]))

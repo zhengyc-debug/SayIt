@@ -194,6 +194,11 @@ def _build_messages(turns: list[dict[str, Any]], language: str, level: str,
                 "NOTE: this is the continuation of an earlier call. The learner's level, "
                 "history and recurring mistakes were already established there. Only "
                 "review the lines below; do not re-assess from scratch.")
+        if meta.get("includes_parent"):
+            parts.append(
+                "NOTE: the earlier part of this conversation never got its own review, so "
+                "its transcript is included ABOVE (before the continuation). Review the "
+                "whole thing as one call.")
         if meta.get("total_turns"):
             parts.append(f"The full call is {meta['total_turns']} lines "
                          f"({meta.get('minutes', 0)} min of speech). Every line is included below.")
@@ -334,7 +339,10 @@ async def generate(user: str, session_id: str, force: bool = False,
     meta = row.get("meta") or {}
     parent_id = meta.get("last_call") or ""
     scope_note = ""
-    if parent_id and not db.get_report(parent_id):
+    # 只有「这通是本次新开的一通」时才算续接。切语速的重连会复用同一个 session_id
+    # （parent_session == 自己），那种情况必须整通复盘，否则会把自己一半的内容当成
+    # 上一通的内容跳过。
+    if parent_id and parent_id != session_id and not db.get_report(parent_id):
         # 上一通还没来得及复盘（自动复盘失败/根本没生成）：那本通得把它一起复盘，
         # 否则那段内容永远没人看。接上父通话的字幕，按时间顺序放前面。
         parent = db.get_session(parent_id, user)
@@ -363,7 +371,8 @@ async def generate(user: str, session_id: str, force: bool = False,
     messages = _build_messages(turns, row.get("language") or "en",
                               row.get("level") or "B1", ui_lang=ui_lang,
                               digest={"prefindings": prefindings} if prefindings else None,
-                              meta={"continuation": bool(parent_id),
+                              meta={"continuation": bool(parent_id) and parent_id != session_id,
+                                    "includes_parent": scope_note == "continued",
                                     "total_turns": len([t for t in turns
                                                         if (t.get("text") or "").strip()]),
                                     "minutes": minutes})
@@ -385,12 +394,14 @@ async def generate(user: str, session_id: str, force: bool = False,
     payload["model"] = llm_conf.get("model", "")
     payload["ui_lang"] = ui_lang      # 这份解释是用哪种母语写的
     # 复盘覆盖了多少内容：句数 / 分块数 / 是否只复盘了本次新增（续接通话）
+    # new_only 只在「自己确实是续接出来的新通话」时为 True
+    new_only = bool(meta.get("continuation")) and parent_id not in ("", session_id)
     payload["coverage"] = {
         "turns": len([t for t in turns if (t.get("text") or "").strip()]),
         "chunks": len(chunks),
-        "continued": bool(parent_id) and scope_note != "continued",
+        "own_turns": len([t for t in (row.get("turns") or []) if (t.get("text") or "").strip()]),
         "includes_parent": scope_note == "continued",
-        "new_only": bool(meta.get("continuation")),
+        "new_only": new_only,
     }
     db.save_report(user, session_id, payload)
     db.replace_errors(user, session_id, payload["errors"])
