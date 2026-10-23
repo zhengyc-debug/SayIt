@@ -987,9 +987,6 @@ a.sess { color: inherit; text-decoration: none; }
 .rule .card-del { top: 50%; right: 2px; transform: translateY(-50%); }
 
 /* 错题条目上的移出按钮：贴右侧，平时低调 */
-.mistake { position: relative; padding-right: 34px; }
-.mistake .card-del { top: 9px; right: 0; }
-.mistake.going { opacity: .35; transition: opacity .18s; }
 .btn.danger:hover { border-color: var(--err); background: var(--err-soft); }
 
 /* 通话记录的删除二次确认：在详情弹层里就地展开，不用原生 confirm
@@ -1017,7 +1014,16 @@ a.sess { color: inherit; text-decoration: none; }
 .empty { color: var(--fg-3); font-size: 13px; padding: 22px 0; text-align: center; }
 
 /* ------------------------------------------------------------------ 错题本 */
-.mistake { padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 1.65; }
+/* 错题条目：正文 + 右侧固定的删除位。按钮是这一行的兄弟节点（flex），
+   不浮在文字上 —— 之前 absolute 定位会被长句压住，看起来像「被字盖了」。 */
+.mistake {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
+  font-size: 14px; line-height: 1.65;
+}
+.mistake > .m-body { flex: 1 1 auto; min-width: 0; }
+.mistake > .card-del { position: static; margin-top: 2px; flex: 0 0 auto; }
+.mistake.going { opacity: .35; transition: opacity .18s; }
 .mistake:last-child { border-bottom: none; }
 .mistake .said { color: var(--err-ink); }
 .mistake .better { color: var(--ok-ink); }
@@ -1232,7 +1238,11 @@ a.sess { color: inherit; text-decoration: none; }
 }
 .wordcard:hover { border-color: var(--accent-line); background: var(--accent-soft); }
 .wordcard:active { transform: scale(.985); }
-.wordcard .w { font-size: 15.5px; font-weight: 620; letter-spacing: -.01em; }
+.wordcard .w {
+  font-size: 15.5px; font-weight: 620; letter-spacing: -.01em;
+  /* 长词（maintainable code / casual matches）在按钮左边换行，不钻到按钮底下 */
+  overflow-wrap: anywhere;
+}
 .wordcard .ph {
   font-size: 11.5px;
   color: var(--accent);
@@ -1258,8 +1268,8 @@ a.sess { color: inherit; text-decoration: none; }
 .wordcell.going { opacity: .35; transition: opacity .18s; }
 .card-del {
   position: absolute;
-  top: 6px; right: 6px;
-  width: 22px; height: 22px;
+  top: 8px; right: 8px;
+  width: 20px; height: 20px;
   display: grid; place-items: center;
   padding: 0;
   border: 1px solid transparent;
@@ -1271,7 +1281,7 @@ a.sess { color: inherit; text-decoration: none; }
   transition: opacity .15s, color .15s, background .15s, border-color .15s;
   -webkit-tap-highlight-color: transparent;
 }
-.card-del svg { width: 12px; height: 12px; }
+.card-del svg { width: 11px; height: 11px; }
 .wordcell:hover .card-del,
 .card-del:focus-visible,
 .card-del:active { opacity: 1; }
@@ -1282,8 +1292,9 @@ a.sess { color: inherit; text-decoration: none; }
   border-color: color-mix(in srgb, var(--err) 38%, transparent);
 }
 .card-del:disabled { cursor: default; opacity: .4; }
-/* 卡片右上角留出位置，词长时不会压到按钮 */
-.wordcell .wordcard { padding-right: 34px; }
+/* 卡片右上角给按钮留固定位置：词再长也只会换行，不会把按钮挤出去。
+   32px = 按钮 20 + 右边距 8 + 一点呼吸，卡片宽度本身不变。 */
+.wordcell .wordcard { padding-right: 32px; }
 
 .wc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .wc-word { font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 0; }

@@ -26,13 +26,16 @@
   <h2>错误类型分布 <small>全部</small></h2>
   <div class="card" id="typedist"><div class="empty">加载中…</div></div>
 
-  <!-- AI 从「你删了什么」里学到的偏好：只影响以后记不记，已经学过的内容不受影响 -->
+  <!-- 暂时不在前端展示「不再记录的类型」规则区。后端仍在学习与生效
+       （/api/error-rules、复盘过滤都正常工作），需要时把这整段和
+       renderRules() 的调用一起取消注释即可。
   <h2>不再记录的类型 <small>AI 从你的删除里学到的</small></h2>
   <p class="sub">
     删掉某类错题两次以上，AI 会归纳成一条规则，之后复盘不再把这类问题记进来
     （比如 um / uh 这种思考语气词）。删掉规则，被它移出的错题会回来。
   </p>
   <div class="card tight" id="rules"><div class="empty">加载中…</div></div>
+  -->
 
   <div class="h2row">
     <h2>你说错过的句子 <small id="cnt"></small></h2>
@@ -58,14 +61,13 @@ let counts = {};
 let stats = {};
 
 async function loadAll() {
-  const [er, rl] = await Promise.all([
-    fetch('/api/errors?limit=200').then(r => r.json()),
-    fetch('/api/error-rules').then(r => r.json()),
-  ]);
+  // 「不再记录的类型」规则区暂时隐藏：这里只取错题列表。
+  // 要恢复规则展示，把注释掉的那段取回，并加回 fetch('/api/error-rules')。
+  const er = await fetch('/api/errors?limit=200').then(r => r.json());
   errors = er.errors || [];
-  counts = er.counts || rl.counts || {};
-  rules = (rl.rules || []).filter(r => (r.rule || '').trim());
-  renderNums(); renderTypes(); renderRules(); renderMistakes();
+  counts = er.counts || {};
+  rules = [];
+  renderNums(); renderTypes(); renderMistakes();
   if (window.I18N) { I18N.apply(document.body); I18N.mountSwitch($('lang-host')); }
 }
 
@@ -96,8 +98,10 @@ function renderTypes() {
 
 /* 「不再记录的类型」：AI 从用户删掉的错题里归纳出的规则。
    删掉规则 = 这条偏好作废，被它移出的错题会回到下面的列表。 */
+// 规则区暂时不在页面上：#rules 不存在时直接返回，函数留着方便恢复
 function renderRules() {
   const host = $('rules');
+  if (!host) return;
   if (!rules.length) {
     const removed = counts.hidden || 0;
     host.innerHTML = `<div class="empty" style="padding:18px 0">
@@ -134,11 +138,13 @@ function renderMistakes() {
   $('mistakes').innerHTML = errors.length
     ? errors.map(e => `
         <div class="mistake">
-          <div><span class="said">${esc(e.you_said)}</span>
-               <span style="color:var(--fg-3)">→</span>
-               <span class="better">${esc(e.better)}</span>
-               <span class="type-badge">${T(TYPE[e.type] || e.type)}</span></div>
-          ${e.why ? `<div class="why">${esc(e.why)}</div>` : ''}
+          <div class="m-body">
+            <div><span class="said">${esc(e.you_said)}</span>
+                 <span style="color:var(--fg-3)">→</span>
+                 <span class="better">${esc(e.better)}</span>
+                 <span class="type-badge">${T(TYPE[e.type] || e.type)}</span></div>
+            ${e.why ? `<div class="why">${esc(e.why)}</div>` : ''}
+          </div>
           <button class="card-del" data-err="${e.id}" title="${T('移出错题本')}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
                  stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
