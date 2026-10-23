@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from .. import auth
 from ..languages import get_language, voices_for
@@ -32,7 +33,7 @@ from ..providers import (
 )
 from ..scenarios import get_scenario, pick_localized
 from ..services import profile as profile_svc
-from ..services import review
+from ..services import recap, review
 from ..services.llm import LLMError
 from ..store import db
 from ..store import settings as store
@@ -92,6 +93,9 @@ async def ws_call(ws: WebSocket) -> None:
     provider = None
     session_id = ""
     started = time.time()
+    # 语速切换会新建一条 WS：它是对同一通电话的「重建会话」，不是新的一通。
+    # 计时、session_id、记录都不该重来 —— 否则用户会看到记录里一堆空通话。
+    speed_switch = False
     try:
         # --- 等 start 指令 -------------------------------------------------
         first = await ws.receive()
@@ -104,6 +108,7 @@ async def ws_call(ws: WebSocket) -> None:
             await ws.send_json({"type": "error", "message": "第一帧 type 必须是 start"})
             await ws.close()
             return
+        speed_switch = req.get("mode") == "speed_switch"
 
         s = store.load_settings(user)
         provider_id = req.get("provider") or s["active"]["provider"]
@@ -136,6 +141,46 @@ async def ws_call(ws: WebSocket) -> None:
         if speed_name not in SPEECH_SPEEDS:
             speed_name = "slow"
         speed = speed_value(speed_name)
+
+        # ---- 继续上一通：拿它的摘要当前文，开一条新记录挂在旧的下面 --------
+        parent_id = str(req.get("parent_session") or "")
+        resume_id = str(req.get("resume_session") or "")
+        parent_row = None
+        if resume_id or parent_id:
+            resume_id = resume_id or parent_id
+            parent_row = db.get_session(resume_id, user)
+            if parent_row is None:
+                log.info("要续聊的通话不存在或不属于当前用户：%s", resume_id)
+                resume_id = ""
+        if resume_id and parent_row:
+            pmeta = parent_row.get("meta") or {}
+            # 场景/语言/等级跟着上一通走，免得续聊时选错了会「失忆」
+            scenario_id = req.get("scenario") or parent_row.get("scenario") or scenario_id
+            lang_code = req.get("language") or parent_row.get("language") or lang_code
+            lang = get_language(lang_code)
+            level = req.get("level") or parent_row.get("level") or level
+            if level not in lang.get("levels", []):
+                level = lang.get("default_level", "B1")
+            voice = req.get("voice") or pmeta.get("voice") or parent_row.get("voice") or voice
+            sum_cache = pmeta.get("summary") or {}
+            need_summary = (not sum_cache.get("summary") and not speed_switch
+                            and bool([t for t in (parent_row.get("turns") or [])
+                                      if (t.get("text") or "").strip()]))
+            if need_summary:
+                # 上一通没来得及做摘要（很短、或上次模型失败）：现在补一份，
+                # 顺便把更早的祖先也一起并进来。失败就用原文兜底，不能开天窗。
+                try:
+                    sum_cache = await recap.build_for_session(user, resume_id)
+                except Exception as e:
+                    log.info("续聊摘要现做失败 %s：%s", resume_id, e)
+                    sum_cache = {}
+            block = recap.prompt_block(sum_cache, parent_row.get("started_at"))
+            if block:
+                extra_rules = (extra_rules + "\n\n" + block).strip()
+                log.info("注入续聊上下文 %d 字 user=%s from=%s", len(block), user, resume_id)
+            elif not speed_switch:
+                log.info("续聊没有可用摘要（该通无语音）%s", resume_id)
+
         try:
             # 长期记忆：水平 / 常犯错 / 最近聊过什么 / 用户自述 → 拼进 prompt
             hint = profile_svc.prompt_hint(user, lang_code, level)
@@ -152,12 +197,26 @@ async def ws_call(ws: WebSocket) -> None:
             assistant_name=req.get("assistant_name") or "",
             extra_rules=extra_rules,
             speed_name=speed_name,
+            resume=bool(resume_id),
         )
+
+        meta: dict[str, Any] = {"instructions": instructions[:4000], "speed": speed_name}
+        if resume_id:
+            pmeta = parent_row.get("meta") or {}
+            meta["last_call"] = resume_id
+            meta["continuation"] = True
+            # 链的根：新记录继承旧的 root_id，统计/追溯时能看出是同一串
+            root = pmeta.get("root_id") or resume_id
+            meta["root_id"] = root
+            # 反过来记一笔：旧记录知道「后来接着聊过」，记录页据此提示
+            db.set_session_meta(resume_id, {
+                "resumed_at": time.time(),
+                "resumed_count": int(pmeta.get("resumed_count") or 0) + 1,
+            })
 
         session_id = db.create_session(
             user, provider=provider_id, language=lang_code, scenario=scenario_id,
-            level=level, voice=voice,
-            meta={"instructions": instructions[:4000], "speed": speed_name},
+            level=level, voice=voice, meta=meta,
         )
 
         provider = create_provider(provider_id, conf=conf, instructions=instructions,
@@ -172,6 +231,9 @@ async def ws_call(ws: WebSocket) -> None:
             return
 
         greeting_info = resolve_greeting(lang_code, scenario_id, voice)
+        if resume_id:
+            # 续聊不播开场白：AI 要接着上次的最后一句话往下说（见 build_instructions）。
+            greeting_info = {"text": "", "audio_url": None, "duration": 0, "resume_hint": True}
         await ws.send_json({
             "type": "ready",
             "session_id": session_id,
@@ -182,16 +244,19 @@ async def ws_call(ws: WebSocket) -> None:
             "level": level,
             "voice": voice,
             "speed": speed_name,
+            "resumed_from": resume_id or None,
             "audio_in_rate": provider.audio_in_rate,
             "audio_out_rate": provider.audio_out_rate,
         })
-        log.info("通话开始 %s user=%s provider=%s lang=%s scenario=%s level=%s voice=%s speed=%s",
+        log.info("通话开始 %s user=%s provider=%s lang=%s scenario=%s level=%s voice=%s"
+                 " speed=%s resumed_from=%s switch=%s",
                  session_id, user, provider_id, lang_code, scenario_id, level, voice,
-                 speed_name)
+                 speed_name, resume_id or "-", speed_switch)
 
         await _pump(ws, provider, session_id)
-        # 挂断后在后台出复盘，不阻塞用户
-        asyncio.create_task(_review_after_call(user, session_id))
+        # 挂断后在后台出复盘，不阻塞用户（切语速的重连不做复盘：那是同一通）
+        if not speed_switch:
+            asyncio.create_task(_review_after_call(user, session_id))
 
     except WebSocketDisconnect:
         log.info("浏览器断开 %s", session_id)
@@ -215,6 +280,34 @@ async def ws_call(ws: WebSocket) -> None:
                                     "duration_ms": dur})
             except Exception:
                 pass
+        # 自动起这份续聊摘要：用户没点「继续」也要有，否则第二天想接着聊时
+        # 那通电话的原文已经在上下文里找不着了。短通话/没语音的在里面跳过。
+        if session_id and not speed_switch and ws.client_state is not WebSocketState.DISCONNECTED:
+            asyncio.create_task(_recap_after_call(user, session_id))
+
+
+# 一次通话少于这么多条字幕就不单独做摘要：下一次「继续」时按链一起总结更值。
+RECAP_MIN_TURNS = 4
+
+
+async def _recap_after_call(user: str, session_id: str) -> None:
+    """挂断后预生成续聊摘要。任何失败只记日志 —— 绝不能影响通话与复盘。"""
+    try:
+        await asyncio.sleep(2.0)          # 让复盘先跑，避免同时抢文本模型的并发
+        row = db.get_session(session_id, user)
+        if not row:
+            return
+        turns = [t for t in (row.get("turns") or []) if (t.get("text") or "").strip()]
+        if len(turns) < RECAP_MIN_TURNS:
+            return
+        meta = row.get("meta") or {}
+        if (meta.get("summary") or {}).get("summary"):
+            return
+        await recap.build_for_session(user, session_id)
+    except (LLMError, ValueError) as e:
+        log.info("续聊摘要跳过 %s：%s", session_id, e)
+    except Exception:
+        log.exception("续聊摘要失败 %s", session_id)
 
 
 async def _review_after_call(user: str, session_id: str) -> None:

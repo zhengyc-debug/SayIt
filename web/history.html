@@ -40,12 +40,15 @@
       <button class="icon-btn" id="d-close" title="关闭">✕</button>
     </div>
     <div class="modal-body">
+      <div class="chain-bar" id="d-chain"></div>
       <div class="turn-list" id="d-turns"></div>
       <div id="rp-host"></div>
     </div>
     <div class="modal-foot">
+      <button class="btn" id="d-del" style="color:var(--err-ink);margin-right:auto">删除</button>
+      <button class="btn primary" id="d-continue">继续这通电话</button>
       <a class="btn" id="d-again" href="/">再练一次</a>
-      <button class="btn primary" id="d-close2">关闭</button>
+      <button class="btn" id="d-close2">关闭</button>
     </div>
   </div>
 </div>
@@ -150,12 +153,42 @@ async function loadReportInto(id, host) {
 }
 
 // ------------------------------------------------------------------ 详情（弹层）
+// 「继续」按钮的可用性：没语音的通话没东西可续，直接禁用，别让用户点了才发现。
+function setContinueState(d) {
+  const btn = $('d-continue');
+  const meta = d.meta || {};
+  const hasTurns = (d.turn_count || 0) > 0;
+  btn.disabled = !hasTurns;
+  btn.title = hasTurns ? T('接着上次没聊完的地方继续说')
+    : T('这通电话没有留下对话，没法接着聊');
+  // 之后又接着聊过的记录：说清楚，免得用户以为这通的内容会「再丢一次」
+  const chain = $('d-chain');
+  const kids = d.child_ids || [];
+  const resumed = meta.resumed_count || 0;
+  chain.innerHTML = resumed
+    ? `<span class="chain-tag">⤵ ${T('后来接着聊过 {n} 次', { n: resumed })}</span>`
+    : '';
+  if (kids.length) {
+    chain.innerHTML += kids.map(id =>
+      `<button type="button" class="link-btn" data-go="${esc(id)}">${T('看后面那次')} ›</button>`
+    ).join('');
+  }
+  chain.querySelectorAll('[data-go]').forEach(n => {
+    n.onclick = () => {
+      history.replaceState({}, '', '/history?session=' + n.dataset.go);
+      loadDetail(n.dataset.go).catch(() => {});
+    };
+  });
+}
+
 async function loadDetail(id) {
   openId = id;
   const modal = $('detail-modal');
   $('d-title').textContent = T('通话详情');
   $('d-sub').textContent = T('加载中…');
   $('d-turns').innerHTML = '';
+  $('d-chain').innerHTML = '';
+  $('d-continue').disabled = true;
   $('rp-host').innerHTML = '<div class="rp-loading"><span class="spinner"></span></div>';
   modal.classList.add('open');
 
@@ -174,12 +207,55 @@ async function loadDetail(id) {
   $('d-again').href = `/?scenario=${encodeURIComponent(d.scenario || '')}` +
     `&level=${encodeURIComponent(d.level || '')}` +
     `&language=${encodeURIComponent(d.language || '')}`;
+  setContinueState(d);
+
+  // 删除：二次确认放在同一个弹层里（不用 window.confirm —— 手机上是两套不同的原生框，
+  // 而且 iOS Safari 的 confirm 会把下面的弹层卡死，导致关不掉）
+  $('d-del').onclick = () => deleteSession(d);
+  $('d-continue').onclick = () => {
+    // 带着这一通的 id 去通话页：那边会先要一份摘要再接通
+    location.assign('/?continue=' + encodeURIComponent(id));
+  };
 
   $('rp-host').innerHTML = '';
   loadReportInto(id, $('rp-host'))
     .then(() => enhance(modal))
     .catch(() => { $('rp-host').innerHTML = ''; });
   enhance(modal);
+}
+
+// ---------------------------------------------------------------- 删除通话记录
+function deleteSession(d) {
+  const kids = d.child_ids || [];
+  const box = document.createElement('div');
+  box.className = 'confirm-inline';
+  box.innerHTML = `
+    <div class="ci-title">${T('确定删除这条通话记录？')}</div>
+    <div class="ci-sub">${fmt(d.started_at)} · ${T('{n} 句', { n: d.turn_count || 0 })}${kids.length
+      ? `<br>${T('这通的复盘和错题也会一起删掉；后面接着聊的那 {n} 次不会删。', { n: kids.length })}`
+      : `<br>${T('这通的字幕、复盘和错题会一起删掉，删了找不回来。')}`}</div>
+    <div class="ci-row">
+      <button class="btn sm" id="ci-cancel">${T('不删')}</button>
+      <button class="btn sm danger" id="ci-ok">${T('确认删除')}</button>
+    </div>`;
+  $('d-turns').innerHTML = '';
+  $('d-turns').appendChild(box);
+  $('ci-cancel').onclick = () => loadDetail(d.id).catch(() => {});
+  $('ci-ok').onclick = async () => {
+    const btn = $('ci-ok');
+    btn.disabled = true;
+    btn.textContent = T('删除中…');
+    const r = await fetch('/api/sessions/' + d.id, { method: 'DELETE' }).then(x => x.json()).catch(() => ({}));
+    if (!r.ok) {
+      btn.disabled = false;
+      btn.textContent = T('确认删除');
+      box.querySelector('.ci-sub').innerHTML =
+        `<span style="color:var(--err-ink)">${esc(r.message || T('删除失败，再试一次'))}</span>`;
+      return;
+    }
+    closeDetail();
+    await loadList();
+  };
 }
 
 function closeDetail() {
@@ -215,7 +291,7 @@ async function loadList() {
   $('list').innerHTML = sessions.map(s => `
     <div class="sess ${s.id === openId ? 'on' : ''}" data-id="${s.id}">
       <div class="meta">
-        <div class="t1">${fmt(s.started_at)} · ${T(SCEN_LABEL(s.scenario))}</div>
+        <div class="t1">${s.last_call ? '<span class="chain-ico" title="' + T('续接的通话') + '">⤵ </span>' : ''}${fmt(s.started_at)} · ${T(SCEN_LABEL(s.scenario))}</div>
         <div class="t2">${s.level || ''} · ${T('{n} 轮', { n: s.turns || 0 })} · ${dur(s.duration_ms)}</div>
       </div>
       <div class="arr">›</div>

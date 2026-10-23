@@ -52,6 +52,14 @@ async def regenerate_word_card(payload: dict[str, Any],
                                 force=True, allow_llm=allow_llm)
 
 
+@router.delete("/words")
+async def delete_all_words(user: str = Depends(current_user)) -> dict[str, Any]:
+    """清空生词本。注意：空路径必须定义在 /words/{word} 之前，否则 DELETE /words
+    会被当成 word="" 的路由匹配掉。"""
+    n = db.delete_all_words(user)
+    return {"ok": True, "deleted": n}
+
+
 @router.delete("/words/{word}")
 async def delete_word(word: str, user: str = Depends(current_user)) -> dict[str, Any]:
     ok = db.delete_word(user, word)

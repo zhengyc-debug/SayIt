@@ -67,7 +67,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ui": {
         "show_captions": True,
         "show_pinyin_hint": False,
-        "call_time_limit_min": 15,
+        # 单次通话时长上限（分钟）。这是产品规则，不是用户偏好，
+        # 所以它是**服务端常量**（见 CALL_TIME_LIMIT_MIN），不吃用户配置 ——
+        # 否则老用户的 settings.json 里存着 15 会一直覆盖掉新默认值。
+        # 到点自动挂断后可以在记录里「继续这通电话」，上下文不丢。
+        "call_time_limit_min": 60,
         # 语速（决定 AI 说得多快）。豆包 session.create 的 audio.output.speed，
         # 实测取 -50/0/50/100 时同一句话的音频长度约 14s / 8s / 4.5s / 3.6s。
         # 默认 -30：练口语时宁可慢一点听清楚。调了就一直生效，不用每次让 AI"说慢点"。
@@ -79,13 +83,25 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 # 语速档位：名字 → 各供应商的参数值。前端只认名字，供应商差异留在后端。
+# 官方定义（端到端实时语音 3.0）：speed 取 [-50, 100]，-50 = 0.5 倍速，0 = 原速，
+# 100 = 2.0 倍速。这是 TTS 侧真正的变速合成（不改音高），不是前端慢放。
 SPEECH_SPEEDS: dict[str, dict[str, Any]] = {
-    "slowest": {"label": "最慢", "label_en": "Slowest", "speed": -50},
-    "slow": {"label": "慢", "label_en": "Slow", "speed": -30},
-    "normal": {"label": "正常", "label_en": "Normal", "speed": 0},
-    "fast": {"label": "快", "label_en": "Fast", "speed": 50},
+    "slowest": {"label": "最慢", "label_en": "Slowest", "speed": -50, "rate": 0.5},
+    "slow": {"label": "慢", "label_en": "Slow", "speed": -30, "rate": 0.7},
+    "normal": {"label": "正常", "label_en": "Normal", "speed": 0, "rate": 1.0},
+    "fast": {"label": "快", "label_en": "Fast", "speed": 50, "rate": 1.5},
 }
 DEFAULT_SPEED = "slow"
+
+# 单次通话最长多久（分钟）。改这个值就是改所有用户的通话上限，前端没有入口。
+# 0 = 不限时。之所以不在 DEFAULT_SETTINGS 之外单独存：前端要能从 settings 里读到，
+# 而写入路径（设置页）已经不提供这个字段，所以用户配置里留下的旧值要在这里兜住。
+CALL_TIME_LIMIT_MIN = 60
+
+
+def call_time_limit_min(settings: dict[str, Any]) -> int:
+    """取通话时长上限：只认服务端常量，忽略用户配置里的历史值（曾默认 15）。"""
+    return int(CALL_TIME_LIMIT_MIN)
 
 
 def speed_value(name: str | None) -> float:
@@ -208,7 +224,8 @@ def public_settings(username: str) -> dict[str, Any]:
         conf.pop("api_key", None)
     # 语速档位的可选项也下发，前端不硬编码名字/顺序
     s["speech_speeds"] = [
-        {"id": k, "label": v["label"], "label_en": v["label_en"], "speed": v["speed"]}
+        {"id": k, "label": v["label"], "label_en": v["label_en"], "speed": v["speed"],
+         "rate": v.get("rate")}
         for k, v in SPEECH_SPEEDS.items()
     ]
     return s

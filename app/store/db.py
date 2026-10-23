@@ -189,14 +189,83 @@ def close_session(session_id: str, duration_ms: int = 0, meta: dict | None = Non
                    session_id))
 
 
+def set_session_meta(session_id: str, patch: dict[str, Any]) -> None:
+    """只合并 meta 里的几个字段，不动 ended_at / duration_ms / turns。
+
+    续聊摘要就是走这里写的：它可能在该通电话结束后很久才生成。
+    """
+    if not patch:
+        return
+    with _lock, _conn() as c:
+        row = c.execute("SELECT meta FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if not row:
+            return
+        merged: dict[str, Any] = {}
+        if row["meta"]:
+            try:
+                merged = json.loads(row["meta"])
+            except Exception:
+                merged = {}
+        merged.update(patch)
+        c.execute("UPDATE sessions SET meta=? WHERE id=?",
+                  (json.dumps(merged, ensure_ascii=False), session_id))
+
+
 def list_sessions(user: str, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
     with _lock, _conn() as c:
         rows = c.execute(
             "SELECT id, started_at, ended_at, provider, language, scenario, level,"
-            " turns, duration_ms FROM sessions WHERE user=?"
+            " turns, duration_ms, CASE WHEN json_valid(meta) THEN"
+            "   json_extract(meta,'$.last_call') END AS last_call"
+            " FROM sessions WHERE user=?"
             " ORDER BY started_at DESC LIMIT ? OFFSET ?",
             (user, max(0, int(limit)), max(0, int(offset)))).fetchall()
     return [dict(r) for r in rows]
+
+
+def delete_session(user: str, session_id: str) -> bool:
+    """删掉一通电话：sessions + turns + reports + errors 一起删。
+
+    从它「继续」出来的后续通话不删（那是另一通独立的记录），只把 meta.last_call
+    断开并标上 detached，否则它们会指向一条已经不存在的父记录。
+    """
+    with _lock, _conn() as c:
+        row = c.execute("SELECT id, meta FROM sessions WHERE id=? AND user=?",
+                        (session_id, user)).fetchone()
+        if not row:
+            return False
+        kids = c.execute(
+            "SELECT id, meta FROM sessions WHERE user=? AND json_valid(meta)"
+            " AND json_extract(meta,'$.last_call') = ?", (user, session_id)).fetchall()
+        for k in kids:
+            try:
+                meta = json.loads(k["meta"] or "{}")
+            except Exception:
+                meta = {}
+            meta.pop("last_call", None)
+            meta["continuation"] = True          # 仍然是续接来的
+            meta["ex_continuation"] = True       # 但上一通已被删除
+            # 根被删了：自己当新根，链不断档
+            meta.pop("root_id", None)
+            c.execute("UPDATE sessions SET meta=? WHERE id=?",
+                      (json.dumps(meta, ensure_ascii=False), k["id"]))
+        c.execute("DELETE FROM turns WHERE session_id=?", (session_id,))
+        c.execute("DELETE FROM errors WHERE session_id=? AND user=?", (session_id, user))
+        c.execute("DELETE FROM reports WHERE session_id=? AND user=?", (session_id, user))
+        c.execute("DELETE FROM sessions WHERE id=? AND user=?", (session_id, user))
+    return True
+
+
+def delete_all_errors(user: str) -> int:
+    with _lock, _conn() as c:
+        cur = c.execute("DELETE FROM errors WHERE user=?", (user,))
+        return cur.rowcount or 0
+
+
+def delete_all_words(user: str) -> int:
+    with _lock, _conn() as c:
+        cur = c.execute("DELETE FROM words WHERE user=?", (user,))
+        return cur.rowcount or 0
 
 
 def count_sessions(user: str) -> int:
@@ -217,7 +286,14 @@ def get_session(session_id: str, user: str | None = None) -> dict[str, Any] | No
             return None
         turns = c.execute("SELECT role, text, ts FROM turns WHERE session_id=?"
                           " ORDER BY id", (session_id,)).fetchall()
+        # 谁是从这一通「继续」出来的（一条链可能好几个孩子）
+        owner = s["user"] if "user" in s.keys() else (user or "")
+        kids = c.execute(
+            "SELECT id FROM sessions WHERE user=? AND id != ? AND json_valid(meta)"
+            " AND json_extract(meta,'$.last_call') = ?"
+            " ORDER BY started_at", (owner, session_id, session_id)).fetchall()
     out = dict(s)
+    out["child_ids"] = [r["id"] for r in kids]
     try:
         out["meta"] = json.loads(out.get("meta") or "{}")
     except Exception:

@@ -7,6 +7,8 @@
   // 界面语言（母语）：只影响文案与复盘解释，不影响练习语言
   const T = (s, v) => (window.I18N ? I18N.t(s, v) : s);
   const UI_EN = () => !!(window.I18N && I18N.lang === 'en');
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const el = {
     status: $('status'), captions: $('captions'), avatar: $('avatar'),
     wrap: $('avatar-wrap'), mute: $('btn-mute'), call: $('btn-call'), timer: $('timer'),
@@ -28,6 +30,8 @@
     speed: 'slow',
     // 回放：把 AI 这一轮的 PCM 攒起来，`response.done` 时挂到字幕气泡上
     rate: 24000, turnPcm: [], turnText: '', replay: null,
+    // 续聊：/?continue=<session_id> 进来时带着这一通，接通前先拿它的摘要
+    resume: null, resumeFor: null,
   };
 
   // ---------------------------------------------------------------- 工具
@@ -64,6 +68,9 @@
     if (el.langHost && window.I18N) I18N.mountSwitch(el.langHost);
     renderChips();
     loadRecap();
+    // 从「通话记录」点「继续这通电话」过来：先把这个状态摆出来，
+    // 用户一眼看到「会接着上次聊」，而不是一个空白的通话页
+    await setupResume(q.get('continue'));
     if (window.I18N) {
       // 切了母语：场景名要跟着变，复盘也要按新语言重新出
       I18N.onChange(() => { renderChips(); renderRecap(); S.reportLang = I18N.lang; });
@@ -191,6 +198,79 @@
     el.avatar.textContent = name.slice(0, 1).toUpperCase();
     el.whoName.textContent = name;
     el.whoSub.textContent = [scenLabel(sc), lang.label, S.pick.level].filter(Boolean).join(' · ');
+  }
+
+  // ---------------------------------------------------------------- 续聊
+  /* 从「通话记录 → 继续这通电话」进来：
+       · 先把 context（场景/语言/等级）对齐到那一通，并按更新时间轴显示
+       · 预取一份摘要，顺带把「模型总结」那 2~5 秒的等待遮掉
+       · 摘要只用来看一眼 + 失败兜底，真正的上下文注入发生在服务端 /ws/call
+     不自动接通 —— 麦克风必须在用户手势里申请，iOS 尤其。 */
+  async function setupResume(id) {
+    if (!id) return;
+    try {
+      const d = await (await fetch('/api/sessions/' + id)).json();
+      if (!d || d.id !== id) throw new Error(d.detail || 'not found');
+      S.resume = { id, scenario: d.scenario, language: d.language, level: d.level };
+      S.resumeGreeting = true;
+      if (d.scenario) S.pick.scenario = d.scenario;
+      if (d.language && S.boot.languages.some(l => l.code === d.language)) S.pick.language = d.language;
+      if (d.level) S.pick.level = d.level;
+      renderChips();
+
+      const when = new Date(d.started_at * 1000).toLocaleString(
+        UI_EN() ? 'en-US' : 'zh-CN',
+        { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+      const sc = (S.boot.scenarios || []).find(s => s.id === d.scenario) || {};
+      el.whoSub.textContent = `${T('接着 {when} 那通聊', { when })} · ${scenLabel(sc)} · ${S.pick.level}`;
+      setStatus(`<span class="resume-dot">⤵</span> ${T('点击下方按钮，接着上次聊')}`);
+
+      const btn = el.call;
+      btn.classList.add('resume');
+      btn.title = T('继续上次没聊完的话题');
+      btn.querySelector('.lbl').textContent = T('继续通话');
+
+      // 预取摘要：失败也不拦着接通（服务端还会自己再算一次）
+      fetch('/api/sessions/' + id + '/continue', { method: 'POST' })
+        .then(r => r.json())
+        .then(g => {
+          S.resumeFor = id;
+          if (g && g.summary && g.summary.summary) {
+            S.resume.summary = g.summary;
+            showResumePreview(g.summary);
+          }
+          if (g && g.status === 'no_speech') {
+            btn.disabled = true;
+            setStatus(`<span class="err">${T('这通没有对话内容，没法接着聊')}</span>`);
+          }
+        })
+        .catch(() => {});
+    } catch (e) {
+      S.resume = null;
+      toast(T('读不到要续聊的那通电话，就当新的一次开始。'), true, 5000);
+    }
+  }
+
+  /* 摘要预览：只显示「聊到哪 + 下一步」，不显示 facts —— 那些是给模型的备忘，
+     给用户看会像在读内部注释。 */
+  function showResumePreview(sum) {
+    // 收起「上次通话」条：续聊时信息已经搬到上方，重复显示只挤位置
+    const tips = $('idle-tips'); if (tips) tips.classList.add('hide');
+    const rec = $('recap'); if (rec) rec.style.display = 'none';
+    const box = document.createElement('div');
+    box.className = 'resume-box';
+    const lines = [];
+    if (sum.topic) lines.push(`<b>${esc(sum.topic)}</b>`);
+    if (sum.summary) lines.push(esc(sum.summary));
+    if (sum.next_step) lines.push(`<span class="nx">${T('接着聊')}：${esc(sum.next_step)}</span>`);
+    box.innerHTML = `<div class="rh">${T('上次聊到这儿')}</div>${lines.map(x => `<p>${x}</p>`).join('')}`;
+    // 接力提示板本来就在「待机」区里（接通后整块自动隐藏），
+    // 放进 captions 是不行的：那个容器只在通话中才显示。
+    const idle = el.idle || $('idle');
+    const host = idle || el.captions;
+    const old = host.querySelector('.resume-box');
+    if (old) old.remove();
+    host.insertBefore(box, host.firstChild);
   }
 
   // 上次通话：把中间的空白填成有用的信息，同时充当"历史入口"
@@ -484,14 +564,23 @@
 
     const ws = S.ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify({
+      const msg = {
         type: 'start',
         language: S.pick.language,
         scenario: S.pick.scenario,
         level: S.pick.level,
         provider: S.boot.active.provider,
         speed: S.speed,              // 语速是会话级参数，建会话时定下
-      }));
+      };
+      if (S.sessionId) {
+        // 这一通已经有记录了 → 这是「切语速」的重连：同一通电话，不要新记录
+        msg.parent_session = S.sessionId;
+        msg.mode = 'speed_switch';
+      } else if (S.resume && S.resume.id) {
+        // 新通话，但接着上次那通聊：服务端会注入它的摘要
+        msg.parent_session = S.resume.id;
+      }
+      ws.send(JSON.stringify(msg));
     };
 
     ws.onmessage = (e) => {
@@ -508,12 +597,24 @@
           document.body.classList.add('in-call');
           setStatus(`<span class="live">●</span> ${T('通话中')}`);
           // 重连（切语速）时不重放开场白、不重置计时和 sessionId —— 用户还在同一通电话里
-          if (!wasInCall) playGreeting(m.greeting);
+          if (!wasInCall) {
+            if (m.greeting && m.greeting.resume_hint) {
+              // 续聊：AI 要接着上次的最后一句话往下说。说一句字幕提示，
+              // 免得接通后那两秒静默看起来像没连上。
+              setCaption('assistant', T('（接着上次聊到的地方…）'), true);
+            } else {
+              playGreeting(m.greeting);
+            }
+          }
           if (m.session_id && !S.sessionId) S.sessionId = m.session_id;
           if (!wasInCall) {
             S.t0 = Date.now();
             S.warned = false;
-            S.limitMs = ((S.boot.ui && S.boot.ui.call_time_limit_min) || 15) * 60000;
+            // 时长上限只由服务端配置决定（默认 60 分钟，见 app/store/settings.py），
+            // 页面上不提供修改：这是产品规则，不是用户选项。
+            // 到点挂断后可以在记录里「继续这通电话」，上下文不丢。
+            const cap = Number((S.boot.ui && S.boot.ui.call_time_limit_min) || 0);
+            S.limitMs = cap > 0 ? cap * 60000 : 0;
             clearInterval(S.tick);
             S.tick = setInterval(tick, 500);
           }
@@ -623,6 +724,13 @@
     setStatus(T('已结束'));
     setChipsEnabled(true);
     const tips = $('idle-tips'); if (tips) tips.classList.remove('hide');
+    // 续聊只对「这一次」有效：挂了就是新的一通。不重置的话，再点开始会继续
+    // 注入上一通的摘要，且按切语速的模式复用旧 session_id —— 记录会错乱。
+    S.resume = null;
+    S.resumeFor = null;
+    el.call.classList.remove('resume');
+    el.call.title = T('开始通话');
+    el.call.querySelector('.lbl').textContent = T('开始通话');
 
     // ---- 再拆资源，每步独立兜底 ----
     try {
@@ -663,6 +771,8 @@
     if (S.inCall) {
       setStatus(`<span class="live">●</span> <span class="t">${fmtTime(used)}</span>`);
     }
+    // limitMs = 0 表示不限时（设置里填 0 / 留空）
+    if (!S.limitMs) return;
     const left = S.limitMs - used;
     if (left <= 60000 && left > 0 && !S.warned) {
       S.warned = true;
@@ -678,8 +788,7 @@
   const TYPE_LABEL = {
     grammar: '语法', tense: '时态', word: '用词', order: '语序', pronunciation: '发音',
   };
-  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
-    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // esc 已在文件顶部定义（续聊预览和复盘共用）
 
   function showReportLoading() {
     el.rpSub.textContent = T('正在分析你的表达…');
@@ -754,6 +863,7 @@
     if (S.inCall) endCall(true);
     else {
       ensurePlayCtx();               // 必须在用户手势里创建，否则 iOS 不出声
+      if (S.resume) toast(T('正在接着上次的话题…'), false, 2500);
       startCall();
     }
   };

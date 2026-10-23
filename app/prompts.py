@@ -68,13 +68,21 @@ def build_instructions(
     assistant_name: str = "",
     extra_rules: str = "",
     speed_name: str = "",
+    resume: bool = False,
 ) -> str:
+    """resume=True：这是「继续上一次没聊完的电话」。
+
+    这时不给开场白 —— 开场白是「刚接通，你先说第一句」，续聊要是还从
+    "Hey, how's it going?" 开始，用户会觉得记忆根本没接上，跟着摘要一起反效果。
+    正常新通话必须保留开场白：豆包没有「主动开口」事件，模型要靠这句指令
+    才会在接通瞬间先出声。
+    """
     lang = get_language(language_code)
     scenario = get_scenario(scenario_id)
     name = (assistant_name or "").strip() or _pick_name(language_code)
     language_word = lang.get("instruction_word", "English")
     native_hint = lang.get("native_hint", "")
-    opening = pick_localized(scenario.get("opening", {}), language_code)
+    opening = "" if resume else pick_localized(scenario.get("opening", {}), language_code)
     scenario_prompt = pick_localized(scenario.get("prompt", {}), language_code)
 
     from .store.settings import speed_label, DEFAULT_SPEED
@@ -95,6 +103,14 @@ def build_instructions(
             f"The call has just connected. Start speaking FIRST, right away, without "
             f"waiting for the learner. Your first line should be close to: "
             f'"{opening}"'
+        )
+    elif resume:
+        parts.append(
+            "## Opening\n"
+            "The call has just connected. Start speaking FIRST, within a couple of "
+            "seconds, without waiting for the learner: pick up exactly where the note "
+            "below left off, in one or two sentences. If a question was left hanging, "
+            "re-ask it as if no time had passed."
         )
     if extra_rules.strip():
         parts.append(f"## Extra rules\n{extra_rules.strip()}")

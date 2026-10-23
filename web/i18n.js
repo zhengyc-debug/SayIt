@@ -84,6 +84,45 @@
     '重新生成': 'Try again',
     '去错题本看看': 'Go to mistakes',
 
+    // ---------------- 续聊 ----------------
+    '继续这通电话': 'Continue this call',
+    '继续通话': 'Continue call',
+    '再练一次': 'Practise again',
+    '接着上次没聊完的地方继续说': 'Pick up where you left off',
+    '这通电话没有留下对话，没法接着聊': 'This call left no transcript, so there is nothing to continue',
+    '这通没有对话内容，没法接着聊': 'No conversation in that call — nothing to continue',
+    '上次聊到这儿': 'Where you left off',
+    '接着聊': 'Next',
+    '接着 {when} 那通聊': 'Continuing the call from {when}',
+    '点击下方按钮，接着上次聊': 'Tap the button below to pick up where you left off',
+    '正在接着上次的话题…': 'Picking up where you left off…',
+    '（接着上次聊到的地方…）': '(Picking up where you left off…)',
+    '后来接着聊过 {n} 次': 'Continued {n} time(s) later',
+    '看后面那次': 'See the later call',
+    '续接的通话': 'Continued from an earlier call',
+    '读不到要续聊的那通电话，就当新的一次开始。':
+      "Couldn't load that call — starting a fresh one instead.",
+    '单次通话时长': 'Call time limit',
+    '分钟，0 = 不限时': 'minutes, 0 = no limit',
+    '到这里会自动挂断，之后可以在记录里点「继续这通电话」接着聊。':
+      'The call ends automatically at this point. You can pick it up later from History.',
+
+    // ---------------- 删除 ----------------
+    '删除': 'Delete',
+    '清空生词本': 'Clear all words',
+    '清空错题本': 'Clear all mistakes',
+    '确定删除这条通话记录？': 'Delete this call?',
+    '这通的字幕、复盘和错题会一起删掉，删了找不回来。':
+      'Its transcript, review and mistakes will be deleted too. This cannot be undone.',
+    '这通的复盘和错题也会一起删掉；后面接着聊的那 {n} 次不会删。':
+      'Its review and mistakes go with it. The {n} later call(s) that continued from it stay.',
+    '确认删除': 'Delete',
+    '不删': 'Keep',
+    '删除中…': 'Deleting…',
+    '删除失败，再试一次': 'Delete failed — try again',
+    '清空失败，再试一次': 'Could not clear — try again',
+    '单次通话最长': 'Call limit',
+
     // 提示 / toast
     '浏览器拒绝了麦克风权限，或当前页面不是 https / localhost。':
       'The browser blocked the microphone, or this page is not served over https / localhost.',

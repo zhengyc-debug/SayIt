@@ -31,7 +31,10 @@
 
   <div id="nums" class="nums" style="margin-top:14px"></div>
 
-  <h2>顺手记住的词 <small id="cnt"></small></h2>
+  <div class="h2row">
+    <h2>顺手记住的词 <small id="cnt"></small></h2>
+    <button class="btn sm danger" id="wipe">清空生词本</button>
+  </div>
   <p class="sub">每通电话挂断后，复盘里标出的生词会自动进这里。点开一个词看音标、释义、例句和词形变化。</p>
   <div id="list"><div class="empty">加载中…</div></div>
 </div>
@@ -103,13 +106,23 @@ async function load() {
 
 $('wc-done').onclick = () => $('word-modal').classList.remove('open');
 
+// 单词删除：直接删，不弹确认（用户明确要求「点了就删」）
 $('wc-del').onclick = async () => {
   const body = $('wc-body');
   const w = body.dataset.word || (body.querySelector('.wc-word') || {}).textContent;
   if (!w) return;
-  if (!confirm(T('把「{w}」移出生词本？', { w }))) return;
-  await fetch('/api/words/' + encodeURIComponent(w), { method: 'DELETE' });
   $('word-modal').classList.remove('open');
+  await fetch('/api/words/' + encodeURIComponent(w), { method: 'DELETE' });
+  await load();
+};
+
+// 清空生词本：同样是点了就清，不做二次确认
+$('wipe').onclick = async () => {
+  const btn = $('wipe');
+  btn.disabled = true;
+  const r = await fetch('/api/words', { method: 'DELETE' }).then(x => x.json()).catch(() => ({}));
+  btn.disabled = false;
+  if (!r.ok) { alert(T('清空失败，再试一次')); return; }
   await load();
 };
 

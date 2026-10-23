@@ -60,6 +60,7 @@ services:
     ports:
       - "433:433"
 
+    volumes:
 volumes:
   sayit-data:
     name: sayit-data
