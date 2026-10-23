@@ -1235,7 +1235,20 @@ a.sess { color: inherit; text-decoration: none; }
   color: var(--fg);
   cursor: pointer;
   transition: border-color .15s, background .15s, transform .12s;
+  /* 卡片内部两列：内容 + 右上角固定的删除位。删除按钮在文档流里，
+     不再靠 absolute 叠加 —— 叠加会随卡片 padding / 词长漂出边框。 */
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
 }
+.wordcard .wc-main { flex: 1 1 auto; min-width: 0; }
+.wordcard .card-del {
+  position: static;
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  margin: -2px -3px 0 0;   /* 视觉上贴齐右上角，但不吃掉内容宽度 */
+}
+.wordcard .card-del svg { width: 10px; height: 10px; }
 .wordcard:hover { border-color: var(--accent-line); background: var(--accent-soft); }
 .wordcard:active { transform: scale(.985); }
 .wordcard .w {
@@ -1292,9 +1305,8 @@ a.sess { color: inherit; text-decoration: none; }
   border-color: color-mix(in srgb, var(--err) 38%, transparent);
 }
 .card-del:disabled { cursor: default; opacity: .4; }
-/* 卡片右上角给按钮留固定位置：词再长也只会换行，不会把按钮挤出去。
-   32px = 按钮 20 + 右边距 8 + 一点呼吸，卡片宽度本身不变。 */
-.wordcell .wordcard { padding-right: 32px; }
+/* 按钮现在是卡片内的一个 flex 子项（见 .wordcard），
+   不需要再靠 padding-right 留位，也不再受定位影响。 */
 
 .wc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .wc-word { font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 0; }

@@ -199,6 +199,8 @@
 
   // 事件委托：任何带 data-word 的元素都能点开词卡
   document.addEventListener('click', (e) => {
+    // 卡片内的删除按钮本身就在 data-word 容器里：不能让它顺带打开词卡
+    if (e.target.closest('[data-del], .card-del')) return;
     const t = e.target.closest('[data-word]');
     if (!t) return;
     e.preventDefault();

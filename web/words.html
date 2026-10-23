@@ -77,22 +77,27 @@ function render() {
     const card = w.card || {};
     const ph = card.phonetic_us || card.phonetic_uk || '';
     const label = card.meaning || w.meaning || '';
-    // 删除放在卡片外面（右上角悬浮的 ⋯ 图标），不用先点开词卡再看一遍才能删
+    // 删除按钮放在**卡片内部**、和内容并排（卡片自己是 flex 两列）。
+    // 之前用 absolute 叠在卡片右上角，卡片有 padding 时会漂出边框。
+    // 现在是 <button> 的兄弟节点但被包进 .wordcard 里 —— 浏览器不允许嵌套 <button>，
+    // 所以整张卡片改成 <div role=button>，用同一个 data-word 打开词卡。
     return `<div class="wordcell">
-      <button type="button" class="wordcard" data-word="${esc(w.word)}"
-              data-meaning="${esc(label)}">
-        <div class="w">${esc(w.word)}</div>
-        <div class="ph">${esc(ph)}</div>
-        <div class="mn">${esc(label)}</div>
-      </button>
-      <button type="button" class="card-del" data-del="${esc(w.word)}"
-              title="${T('从生词本删除')}" aria-label="${T('从生词本删除')}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-             stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
+      <div class="wordcard" role="button" tabindex="0" data-word="${esc(w.word)}"
+           data-meaning="${esc(label)}">
+        <div class="wc-main">
+          <div class="w">${esc(w.word)}</div>
+          <div class="ph">${esc(ph)}</div>
+          <div class="mn">${esc(label)}</div>
+        </div>
+        <button type="button" class="card-del" data-del="${esc(w.word)}"
+                title="${T('从生词本删除')}" aria-label="${T('从生词本删除')}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+               stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
     </div>`;
   }).join('') + `</div>`;
-  // 卡片外的删除按钮：点一下就删（不弹确认），顺手把卡片淡出，避免闪一下整页重排
+  // 卡片内的删除按钮：点一下就删（不弹确认），顺手把卡片淡出，避免闪一下整页重排
   list.querySelectorAll('[data-del]').forEach(btn => {
     btn.onclick = async (e) => {
       e.stopPropagation();
@@ -109,6 +114,15 @@ function render() {
       }
       await load();
     };
+  });
+  // 卡片不是 <button> 了（内部要放删除按钮，button 不能嵌套），补上键盘可达性
+  list.querySelectorAll('.wordcard[role="button"]').forEach(card => {
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (window.WORDS) WORDS.open(card.dataset.word, { fallback: card.dataset.meaning || '' });
+      }
+    });
   });
   if (window.I18N) I18N.apply(list);
 }
