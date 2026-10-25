@@ -74,6 +74,17 @@ async def me_page() -> FileResponse:
     return _page("me.html")
 
 
+@router.get("/admin")
+async def admin_page() -> FileResponse:
+    """后台人员管理。权限在 require_login 中间件里按 role 拦，非 admin 直接跳回首页。"""
+    return _page("admin.html")
+
+
+@router.get("/admin.js")
+async def admin_script() -> FileResponse:
+    return FileResponse(WEB_DIR / "admin.js", media_type="application/javascript")
+
+
 @router.get("/settings.js")
 async def settings_script() -> FileResponse:
     """设置页脚本。

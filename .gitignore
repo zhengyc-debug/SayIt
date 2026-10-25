@@ -35,3 +35,8 @@ data/*.bak
 
 # 生成开场白时的临时脚本/样本
 data/greetings/_trigger.*
+
+# nginx 证书（绝不进 Git）
+deploy/nginx/certs/*.crt
+deploy/nginx/certs/*.key
+deploy/nginx/certs/*.pem

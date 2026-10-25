@@ -48,6 +48,16 @@
       <button class="btn sm" id="logout" style="margin-left:auto">退出登录</button>
     </div>
   </div>
+
+  <!-- 只有 admin 看得到：后台人员管理 -->
+  <div id="admin-entry" style="display:none;margin-top:12px">
+    <a class="card tight" href="/admin"
+       style="display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit">
+      <div class="meta"><div class="t1">后台 · 人员管理</div>
+        <div class="t2">新增账号 / 改密码 / 禁用</div></div>
+      <div class="arr" style="margin-left:auto;color:var(--fg-3)">›</div>
+    </a>
+  </div>
 </div>
 
 <script src="/static/i18n.js"></script>
@@ -109,6 +119,8 @@ fetch('/api/auth-state').then(r => r.json()).then(d => {
   $('who').textContent = d.user.display_name || d.user.username;
   $('who-sub').textContent = d.user.display_name && d.user.display_name !== d.user.username
     ? `账号 ${d.user.username}` : '已登录';
+  // 管理员才把后台入口放出来（真正的权限判定在服务端）
+  if (d.user.role === 'admin') $('admin-entry').style.display = '';
 }).catch(() => {});
 
 $('logout').onclick = async () => {

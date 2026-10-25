@@ -5,7 +5,8 @@
     env -u PYTHONPATH .venv/Scripts/python.exe tools/check_speed_e2e.py --speed normal
 
 验证内容：
-  1. 登录（需先在 data/users.csv 里造一行测试账号）
+  1. 登录（需先有可用账号：admin 后台 /api/admin/users 新建，或
+     python -m app.store.accounts add <用户名> <密码>）
   2. 连 /ws/call，发 start（带 speed 档位名）
   3. 断言 ready.speed == 请求的档位
   4. 推一段真实人声触发一轮回复，统计音频字节数（语速越快，同一句越短）

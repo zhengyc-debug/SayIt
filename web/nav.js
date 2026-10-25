@@ -16,6 +16,8 @@
 
   // 登录页不显示标签栏
   if (location.pathname === '/login') return;
+  // 后台是管理页，进去之后应该「返回应用」，而不是继续在应用标签间跳
+  if (location.pathname === '/admin') return;
 
   const I = {
     call: '<path d="M4.5 4.5h3l1.5 4-2 1.5a11 11 0 0 0 5 5l1.5-2 4 1.5v3a1.5 1.5 0 0 1-1.6 1.5A16.5 16.5 0 0 1 3 6.1 1.5 1.5 0 0 1 4.5 4.5z"/>',

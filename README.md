@@ -20,19 +20,32 @@ run.bat              # Windows：本机开发 http://127.0.0.1:8787
 
 ### 登录
 
-单人使用，账号写在 `data/users.csv` 里，格式 `用户名,密码,显示名`：
+账号存在 `data/sayit.db` 的 `accounts` 表里，由 **admin 在 `/admin` 后台**维护
+（新增人员 / 改密码 / 禁用 / 删除）。服务启动时自动建表并保证有一个 admin：
 
-```csv
-username,password,display_name
-admin,你的密码,郑昱川
+- `SAYIT_ADMIN_PASSWORD` 有值 → 首次启动用它建 admin
+- 没有 → 随机生成，打印一次到日志
+- 已经有 admin → 不动它（不会覆盖已改过的密码）
+- 忘了密码 → `SAYIT_ADMIN_PASSWORD=新密码` + `SAYIT_ADMIN_PASSWORD_FORCE=1` 重启一次
+
+后台入口在「我的」页底部（只有 admin 看得到）。接口在 `/api/admin/*`，
+权限判定在 `app/main.py` 的 `require_login` 中间件 + `admin_routes.py` 两层。
+**最后一个可用的 admin 不能被删除/降级/禁用**。
+
+命令行（不进网页也能管账号）：
+
+```bash
+python -m app.store.accounts list
+python -m app.store.accounts add zhangsan 密码 --display 张三
+python -m app.store.accounts passwd zhangsan 新密码
 ```
 
-- 密码可以直接写明文，也可以写 `pbkdf2_sha256` 哈希：
-  `python -m app.auth hash 你的密码` 生成后粘到第二列
-- 改完**不用重启**，下次登录即生效；把某人从文件里删掉，他的登录态立即失效
+其它登录行为：
+
 - 所有页面和 `/api/*` 都要求登录，未登录的页面请求 303 跳 `/login`、接口返回 401
 - WebSocket 同样鉴权，未登录直接拒绝握手（close code `4401`，前端收到就跳登录页）
-- cookie 签名用 `.env` 的 `SECRET_KEY`，不填会随机生成 —— 代价是每次重启都要重新登录
+- 账号被删除或禁用后，已有 cookie **立即失效**（每个请求都查库）
+- cookie 签名用 `.env` 的 `SECRET_KEY`，不填会自动生成并保存到 `data/secret.key`（重启不掉登录）
 - 同一 IP 5 分钟内错 8 次，锁定 5 分钟
 - 退出入口在「我的」页底部
 
@@ -44,13 +57,15 @@ admin,你的密码,郑昱川
 | 所有页面（`/`、`/settings`、`/history`、`/stats`、`/me`）及 `/sw.js`、`/manifest.webmanifest` | `303` 跳 `/login?next=...` |
 | `/ws/call` | 握手直接拒绝，close code `4401` |
 | `/greetings/*`（开场白音频） | `303` 跳登录 |
+| `/admin`、`/admin.js`、`/api/admin/*` | 未登录 `401`/`303`；**已登录但非 admin 一律 403/跳首页** |
 | `/static/*` | **按文件名白名单公开**，只有 `styles.css` `app.js` `i18n.js` `nav.js` `audio-worklet.js` `icon.svg` |
 | `/login`、`/api/login`、`/api/auth-state` | 公开（登录本身需要） |
 
 `/static` 用的是**文件名白名单**而不是后缀白名单：`settings.js` 也是 `.js`，但只有登录后的设置页才用，
 不该公开。HTML 一律走显式路由（受登录保护），`/static/*.html` 一律 404。
+后台的 `admin.js` 同理，走 `/admin.js` 这条受保护路由。
 
-`data/users.csv` 已在 `.gitignore` 里，不进 Git。格式参考 `data/users.example.csv`。
+老版本的 `data/users.csv` 已废弃：首次启动会自动导入并改名成 `users.csv.migrated`。
 
 ### 运行环境（重要）
 
@@ -257,7 +272,7 @@ SayIt/
 │  └─ history.html                         通话记录
 ├─ tools/
 │  └─ gen_greetings.py     预生成开场白
-├─ data/                    sayit.db / users.csv / greetings/ / secret.key
+├─ data/                    sayit.db（含 accounts 账号表）/ greetings/ / secret.key
 │  └─ users/<用户名>/settings.json          每个账号自己的配置与 API Key
 ├─ log/                     sayit.log 运行日志（轮转，不进 Git）
 └─ run.sh

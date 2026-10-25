@@ -7,15 +7,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import threading
 import time
 import uuid
 from typing import Any
 
 from .settings import LEGACY_OWNER
-from ..paths import DATA_DIR, DB_PATH
-
-_lock = threading.Lock()
+from .sqlite_conn import LOCK as _lock, _conn, ensure_schema
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -108,13 +105,6 @@ _ADD_COLUMNS = {
 }
 
 
-def _conn() -> sqlite3.Connection:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB_PATH, timeout=10)
-    c.row_factory = sqlite3.Row
-    return c
-
-
 def _cols(c: sqlite3.Connection, table: str) -> set[str]:
     return {r["name"] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
 
@@ -161,9 +151,11 @@ def _migrate(c: sqlite3.Connection) -> None:
 
 
 def init_db() -> None:
+    """建表 + 老库迁移 + 账号表。启动时调一次，幂等。"""
     with _lock, _conn() as c:
         c.executescript(SCHEMA)
         _migrate(c)
+    ensure_schema()
 
 
 # ---------------------------------------------------------------------------

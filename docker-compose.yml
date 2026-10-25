@@ -1,11 +1,18 @@
-# SayIt 的 Docker Compose 配置
+# SayIt 的 Docker Compose 配置：两个容器，一个私有网络，nginx 对外。
 #
 #   docker compose up -d --build     # 构建并启动
-#   docker compose logs -f           # 看日志（首次启动的随机密码在这里）
+#   docker compose logs -f sayit     # 看日志（首次启动的随机 admin 密码在这里）
 #   docker compose down              # 停止（数据保留在卷里）
 #
-# 数据全部落在命名卷 sayit-data，删容器不丢数据。
-# 想把数据放在宿主机目录（方便备份/迁移），把 volumes 那两行换成注释里的写法。
+# 网络模型：
+#   公网 ──► nginx (暴露 80/443) ──┬─ keeplearning.icu ─► sayit:8787 ─► 豆包 wss
+#                                  └─ 其它 Host/裸 IP  ─► 444 断开
+#   · 只有 nginx 发布端口，sayit 在 sayit-net 内部网络上用服务名互相访问。
+#   · sayit 不再发布到宿主机 —— 原来的 127.0.0.1:8787 在容器里用不上，
+#     反而会和宿主机上手工跑的 nginx 抢端口。要本机调试就加 profiles: ["debug"]。
+#
+# 数据全部落在命名卷 sayit-data：sayit.db（含 accounts 账号表）/ users/<名>/settings.json
+# / greetings / secret.key。删容器不丢数据。
 
 services:
   sayit:
@@ -16,24 +23,32 @@ services:
     container_name: sayit
     restart: unless-stopped
 
+    # 只在本机调试时才发布端口（默认不发布，公网只能经 nginx 进来）：
+    #   docker compose --profile debug up -d
     ports:
-      # 只绑回环更安全：外面用 nginx 反代 + HTTPS（手机要用麦克风必须 https）。
-      # 想直接局域网访问，改成 "8787:8787"。
       - "127.0.0.1:8787:8787"
+    profiles: ["debug"]
 
     volumes:
-      # 数据库 / 账号 / 每人配置 / 开场白 / 签名密钥 全在这一个卷里
       - sayit-data:/app/data
-      # 宿主机目录写法：
-      # - ./data:/app/data
+      # 想用宿主机目录（方便备份）时换成：
+      # - ./data:/app/data    # 记得 chown -R 10001:10001 ./data
 
     environment:
       TZ: Asia/Shanghai
       LOG_LEVEL: INFO
-      # 首次启动的管理员密码。不填会自动生成随机密码并打印到日志。
-      # SAYIT_ADMIN_PASSWORD: "换成一个你自己的强密码"
+      # 首次启动创建 admin 用的密码。不填则随机生成，打印一次到日志。
+      # 已经有 admin 时这个值不会覆盖已有密码（防止重启把自己锁在外面）。
+      SAYIT_ADMIN_PASSWORD: "123456"
+      # 忘了密码时的出口：设新密码 + 把下一行改成 1，重启一次即重置，之后改回 0。
+      # SAYIT_ADMIN_PASSWORD_FORCE: "1"
       # 登录 cookie 签名密钥。不填会自动生成并保存到 data/secret.key。
       # SECRET_KEY: ""
+
+    expose:
+      - "8787"          # 只对 sayit-net 内的容器开放，不对外
+
+    # 上面 expose 只是文档性声明，真正的边界是「不发布端口」。
 
     # 音频是持续的小包，给足文件句柄和网络缓冲
     ulimits:
@@ -46,7 +61,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 20s
 
     logging:
       driver: json-file
@@ -54,13 +69,42 @@ services:
         max-size: "10m"
         max-file: "3"
 
+    networks:
+      - sayit-net
+
   nginx:
-    image: nginx:latest
+    image: nginx:1.27-alpine
     container_name: nginx_for_sayit
+    restart: unless-stopped
+
+    depends_on:
+      sayit:
+        condition: service_healthy
+
     ports:
-      - "433:433"
+      - "80:80"         # 证书验证 + HTTP→HTTPS
+      - "443:443"       # 真正的入口
 
     volumes:
+      # 整份 nginx 配置（一次性挂进去，容器里不用再改）
+      - ./deploy/nginx/sayit.conf:/etc/nginx/conf.d/default.conf:ro
+      # 证书目录：keeplearning.icu_bundle.crt / keeplearning.icu.key
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - sayit-net
+
 volumes:
   sayit-data:
     name: sayit-data
+
+networks:
+  sayit-net:
+    driver: bridge
+    name: sayit-net

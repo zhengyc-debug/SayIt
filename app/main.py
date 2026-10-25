@@ -29,8 +29,9 @@ from starlette.staticfiles import StaticFiles
 
 from . import auth
 from .logging_setup import setup_logging
-from .paths import DATA_DIR, GREET_DIR
+from .paths import DATA_DIR, DB_PATH, GREET_DIR
 from .routers import (
+    admin_routes,
     auth_routes,
     call_routes,
     history_routes,
@@ -40,6 +41,7 @@ from .routers import (
     stats_routes,
     words_routes,
 )
+from .store import accounts
 from .store import db
 from .store import settings as store
 
@@ -50,11 +52,13 @@ log = logging.getLogger("sayit")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    # 账号表 + admin 账号初始化。已有 admin 时不会改密码，只补建缺失的。
+    accounts.init_accounts()
     # 老版本是全局单文件配置；升级后归到 LEGACY_OWNER 名下，不丢已有 Key
     if store.migrate_legacy(DATA_DIR / "settings.json"):
         log.info("已把旧的全局 data/settings.json 迁移到用户 %s 名下",
                  store.LEGACY_OWNER)
-    log.info("SayIt 启动 | 用户配置目录=%s", store.USERS_DIR)
+    log.info("SayIt 启动 | 用户配置目录=%s | 账号库=%s", store.USERS_DIR, DB_PATH)
     yield
 
 
@@ -68,6 +72,7 @@ async def no_cache_static(request: Request, call_next):
     path = request.url.path
     if path.startswith("/static") or path in (
             "/", "/settings", "/history", "/stats", "/me", "/settings.js",
+            "/admin", "/admin.js",
             "/words", "/words.js", "/words.html", "/theme.js"):
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
@@ -99,6 +104,16 @@ async def require_login(request: Request, call_next):
             return JSONResponse(status_code=401, content={"error": "unauthorized"})
         return RedirectResponse(url=f"/login?next={path}", status_code=303)
 
+    # 后台只给 admin。接口层的细化判定还在 admin_routes 里，
+    # 这里挡住页面路由（/admin、/admin.js）和整片 /api/admin/，
+    # 非 admin 的用户连页面都拿不到，不会先看到一张空表再报 403。
+    if path == "/admin" or path == "/admin.js" or path.startswith("/api/admin/"):
+        if not auth.is_admin(user):
+            if path.startswith("/api/"):
+                return JSONResponse(status_code=403,
+                                    content={"ok": False, "error": "需要管理员权限"})
+            return RedirectResponse(url="/", status_code=303)
+
     request.state.user = user
     return await call_next(request)
 
@@ -119,6 +134,7 @@ app.add_middleware(
 # 路由
 # ---------------------------------------------------------------------------
 app.include_router(auth_routes.router)
+app.include_router(admin_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(call_routes.router)
 app.include_router(history_routes.router)

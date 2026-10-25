@@ -238,22 +238,33 @@ echo '0 4 * * * bash /opt/sayit/deploy/backup.sh' | crontab -
 
 ## 9. 登录（应用自带，不用 nginx auth_basic）
 
-应用已经有登录系统：账号在 `data/users.csv`，格式 `用户名,密码,显示名`。
+应用已经有登录系统：账号在 `data/sayit.db` 的 `accounts` 表里，由 admin 在
+`/admin` 后台维护（新增人员 / 改密码 / 禁用 / 删除）。
+
+部署后第一件事：在 `.env` 里定一个 admin 密码，再启动服务。
 
 ```bash
-# 部署后第一件事：改掉默认密码
 ssh root@你的公网IP
-vi /opt/sayit/data/users.csv
-chown sayit:sayit /opt/sayit/data/users.csv
-chmod 600 /opt/sayit/data/users.csv
+cd /opt/sayit
+vi .env          # 加一行 SAYIT_ADMIN_PASSWORD=你的强密码
+systemctl restart sayit
 ```
 
-密码想放哈希就先在本机生成：
+- 第一次启动时表是空的 → 用这个密码建 admin
+- 已经有 admin → 不会覆盖（改了 `.env` 也没用）
+- 忘了密码 → 再临时加 `SAYIT_ADMIN_PASSWORD_FORCE=1` 重启一次，然后删掉这行
+
+不想进网页也能管账号：
 
 ```bash
-python -m app.auth hash '你的密码'
-# pbkdf2_sha256$260000$...$...  ← 粘到 CSV 第二列
+cd /opt/sayit
+sudo -u sayit ./.venv/bin/python -m app.store.accounts list
+sudo -u sayit ./.venv/bin/python -m app.store.accounts add zhangsan 密码 --display 张三
+sudo -u sayit ./.venv/bin/python -m app.store.accounts passwd zhangsan 新密码
 ```
+
+老版本的 `data/users.csv` 会在首次启动时自动导入（同名跳过），
+文件名改为 `users.csv.migrated`，之后以库为准。
 
 `.env` 里务必设一个固定的 `SECRET_KEY`（否则每次重启服务所有人要重新登录）：
 
