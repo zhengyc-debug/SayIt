@@ -11,15 +11,17 @@ from __future__ import annotations
 import sqlite3
 import threading
 
-from ..paths import DATA_DIR, DB_PATH
+from .. import paths
 
 # 所有模块共用这一把锁：web 线程、WebSocket 线程都往同一个库里写
 LOCK = threading.RLock()
 
 
 def _conn() -> sqlite3.Connection:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB_PATH, timeout=10)
+    # 路径在调用时取，不在 import 期复制常量：命令行工具/测试改了 paths.DATA_DIR
+    # 之后，这里必须跟着走，否则会连到老库里。
+    paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(paths.DB_PATH, timeout=10)
     c.row_factory = sqlite3.Row
     return c
 
@@ -27,10 +29,12 @@ def _conn() -> sqlite3.Connection:
 def ensure_schema() -> None:
     """建库建表。必须幂等 —— 每次启动都会跑。
 
-    账号表放在这里而不是 db.py：容器里 app 启动前可能有人先跑
-    `python -m app.accounts`（命令行加账号），那时也得能建出表来。
+    账号 / 用户配置两张表放在这里而不是 db.py：容器里 app 启动前可能有人先跑
+    `python -m app.store.accounts`（命令行加账号），那时也得能建出表来。
     """
     from .accounts import SCHEMA as ACCOUNTS_SCHEMA
+    from .settings import SCHEMA as SETTINGS_SCHEMA
 
     with LOCK, _conn() as c:
         c.executescript(ACCOUNTS_SCHEMA)
+        c.executescript(SETTINGS_SCHEMA)

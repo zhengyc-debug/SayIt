@@ -9,9 +9,12 @@ User=sayit
 Group=sayit
 WorkingDirectory=/opt/sayit
 
-# .env 里的 KEY 会被 python-dotenv 读到；这里再喂一份给 systemd 也无害
+# 唯一需要的外部配置是 admin 密码。其它状态（账号/配置/记录/签名密钥）
+# 全在 /opt/sayit/data/sayit.db 里，不需要任何 .env 文件。
 Environment=PYTHONUNBUFFERED=1
-EnvironmentFile=-/opt/sayit/.env
+Environment=SAYIT_DATA_DIR=/opt/sayit/data
+Environment=SAYIT_LOG_DIR=/opt/sayit/log
+Environment=SAYIT_ADMIN_PASSWORD=123456
 
 # 只监听回环，TLS 交给 nginx
 ExecStart=/opt/sayit/.venv/bin/uvicorn app.main:app \

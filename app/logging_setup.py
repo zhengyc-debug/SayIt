@@ -18,8 +18,8 @@ import logging.config
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-LOG_DIR = BASE_DIR / "log"
+from .paths import LOG_DIR
+
 LOG_FILE = LOG_DIR / "sayit.log"
 
 LOG_FORMAT = "%(asctime)s %(levelname)-7s [%(name)s] %(message)s"

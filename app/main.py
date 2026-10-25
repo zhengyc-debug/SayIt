@@ -3,7 +3,10 @@
 这个文件只做三件事：
   1. 建 app、挂中间件（登录门禁 / 会话 cookie / 静态禁用缓存）
   2. 挂各 router 模块
-  3. 启动时初始化数据库、迁移老配置
+  3. 启动时初始化数据库（建表 / 建 admin / 生成签名密钥）
+
+所有状态（账号、每人配置、通话记录）都在一个 SQLite 文件里，
+不再有 users.csv / settings.json / secret.key 这些散落文件。
 
 具体接口按模块分散在 app/routers/：
   auth_routes.py     登录 / 登出 / healthcheck
@@ -24,12 +27,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.staticfiles import StaticFiles
 
 from . import auth
 from .logging_setup import setup_logging
-from .paths import DATA_DIR, DB_PATH, GREET_DIR
+from . import paths
 from .routers import (
     admin_routes,
     auth_routes,
@@ -41,31 +44,38 @@ from .routers import (
     stats_routes,
     words_routes,
 )
-from .store import accounts
-from .store import db
+from . import store as store_seed      # 包级：ensure_dirs / seed_greetings
+from .session_middleware import LazySessionMiddleware
+from .store import accounts, db
 from .store import settings as store
 
 setup_logging()
 log = logging.getLogger("sayit")
 
 
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 顺序有讲究：
+    #   1. 建目录 + 补开场白（卷可能是空的）
+    #   2. 建所有表（业务表 + accounts / user_settings / app_meta）
+    #   3. 保证有 admin、读/生成签名密钥（中间件第一次请求时才会用到它）
+    store_seed.ensure_dirs()
+    store_seed.seed_greetings()
+
     db.init_db()
-    # 账号表 + admin 账号初始化。已有 admin 时不会改密码，只补建缺失的。
     accounts.init_accounts()
-    # 老版本是全局单文件配置；升级后归到 LEGACY_OWNER 名下，不丢已有 Key
-    if store.migrate_legacy(DATA_DIR / "settings.json"):
-        log.info("已把旧的全局 data/settings.json 迁移到用户 %s 名下",
-                 store.LEGACY_OWNER)
-    log.info("SayIt 启动 | 用户配置目录=%s | 账号库=%s", store.USERS_DIR, DB_PATH)
+    store.init_settings(paths.DATA_DIR)
+    auth.session_secret()          # 提前把密钥写进库，顺带打日志
+
+    log.info("SayIt 启动 | 数据目录=%s | 库=%s", paths.DATA_DIR, paths.DB_PATH)
     yield
 
 
 app = FastAPI(title="SayIt", version="0.2.0", lifespan=lifespan)
 
 
-@app.middleware("http")
 async def no_cache_static(request: Request, call_next):
     """开发期禁用静态资源缓存 —— 否则改了 JS/CSS 刷新看不到效果。"""
     response = await call_next(request)
@@ -91,7 +101,6 @@ def _is_public(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
 
 
-@app.middleware("http")
 async def require_login(request: Request, call_next):
     path = request.url.path
     if _is_public(path):
@@ -119,16 +128,24 @@ async def require_login(request: Request, call_next):
 
 
 # 登录态 = 签名 cookie。
-# add_middleware 是 LIFO：最后加的跑在最外层。这里必须放在 require_login
-# 之后，否则 SessionMiddleware 在门禁内侧，request.session 直接取不到。
+# 用 LazySessionMiddleware：密钥存在 sayit.db 里，要等 lifespan 建完表才存在，
+# 而 Starlette 只允许在 import 期 add_middleware。中间件在第一次请求时再去库里取。
+#
+# 装配顺序 = 从外到内（Starlette 用 insert(0)，列表越靠前越在外层）：
+#   require_login（最外：先判登录，未授权直接拒）
+#     → LazySessionMiddleware（读 cookie，写 request.session）
+#       → no_cache_static（最内：只改响应头）
+# 顺序搞反会报 AssertionError: SessionMiddleware must be installed。
+app.add_middleware(BaseHTTPMiddleware, dispatch=require_login)
 app.add_middleware(
-    SessionMiddleware,
-    secret_key=auth.session_secret(),
+    LazySessionMiddleware,
+    secret_loader=auth.lazy_secret,
     session_cookie="sayit_session",
     max_age=auth.COOKIE_MAX_AGE,
     same_site="lax",
     https_only=False,   # 线上走 nginx 的 https，应用只见 http，置 True 会丢 cookie
 )
+app.middleware("http")(no_cache_static)
 
 # ---------------------------------------------------------------------------
 # 路由
@@ -144,5 +161,6 @@ app.include_router(me_routes.router)
 app.include_router(pages_routes.router)
 
 # 开场白音频（模型自己念的录音）
-GREET_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/greetings", StaticFiles(directory=str(GREET_DIR)), name="greetings")
+# 开场白音频：走数据目录（镜像里的默认值由 store.seed_greetings 复制过来）
+paths.GREET_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/greetings", StaticFiles(directory=str(paths.GREET_DIR)), name="greetings")

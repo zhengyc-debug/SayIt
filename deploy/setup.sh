@@ -56,7 +56,6 @@ fi
 
 echo "== 4/7 目录权限 =="
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-chmod 600 "$APP_DIR/.env" 2>/dev/null || true
 
 echo "== 5/7 systemd 服务 =="
 install -m 644 "$APP_DIR/deploy/sayit.service" /etc/systemd/system/sayit.service
@@ -113,5 +112,5 @@ fi
 echo
 echo "==== 完成 ===="
 echo "  应用： systemctl status sayit / journalctl -u sayit -f"
-echo "  日志： /opt/sayit/data"
-echo "  配置： /opt/sayit/data/settings.json（网页 /settings 改）"
+echo "  数据： /opt/sayit/data/sayit.db（账号/配置/记录/签名密钥全部在这一个文件）"
+echo "  配置： 网页 /settings 改；管理员密码在 systemd 的 Environment=SAYIT_ADMIN_PASSWORD"

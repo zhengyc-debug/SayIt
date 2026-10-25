@@ -29,7 +29,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.config import DATA_DIR, get_provider_conf, load_settings  # noqa: E402
+from app.paths import DATA_DIR, GREET_DIR  # noqa: E402
+from app.store import settings as store  # noqa: E402
+from app.store.settings import get_provider_conf, load_settings  # noqa: E402
 from app.languages import LANGUAGES, voices_for  # noqa: E402
 from app.prompts import build_instructions  # noqa: E402
 from app.providers import (  # noqa: E402
@@ -38,7 +40,6 @@ from app.providers import (  # noqa: E402
 )
 from app.scenarios import SCENARIOS, pick_localized  # noqa: E402
 
-GREET_DIR = DATA_DIR / "greetings"
 INDEX = GREET_DIR / "index.json"
 
 
@@ -138,11 +139,15 @@ async def main() -> int:
     ap.add_argument("--provider", default=None)
     ap.add_argument("--language", default=None)
     ap.add_argument("--scenario", default=None)
+    ap.add_argument("--user", default=store.LEGACY_OWNER,
+                    help="用哪个账号的 API Key 生成（默认 admin）")
     args = ap.parse_args()
 
-    s = load_settings()
+    # 开场白用哪个账号的 Key：默认 admin（LEGACY_OWNER），可用 --user 指定
+    who = args.user
+    s = load_settings(who)
     pid = args.provider or s["active"]["provider"]
-    conf = get_provider_conf(pid)
+    conf = get_provider_conf(who, pid)
     if not conf.get("api_key"):
         print(f"[X] {pid} 没有 API Key")
         return 2

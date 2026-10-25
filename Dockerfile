@@ -39,6 +39,7 @@ RUN mkdir -p /app/data/users /app/data/recordings /app/log \
 USER 10001
 
 ENV SAYIT_DATA_DIR=/app/data \
+    SAYIT_LOG_DIR=/app/log \
     PORT=8787
 
 EXPOSE 8787

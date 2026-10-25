@@ -4,8 +4,9 @@
 后台或命令行管理。服务每次启动都会保证有一个 admin 账号。
 
 登录态：签名 cookie（Starlette SessionMiddleware 实现）。
-  cookie 里只放 username，签名密钥优先读 .env 的 SECRET_KEY，
-  没配就自动生成并保存到 data/secret.key（重启不会掉登录）。
+  cookie 里只放 username；签名密钥优先读环境变量 SECRET_KEY，
+  没有就随机生成并**存进数据库**（app_meta 表）—— 重启不会掉登录，
+  也不需要 data/secret.key 这个文件。
 
 安全取舍（个人项目，够用为止）：
   - 密码存 pbkdf2_sha256（兼容老 CSV 里手写的明文/哈希）；
@@ -22,10 +23,14 @@ import time
 
 from fastapi import Request
 
-from .paths import SECRET_PATH
 from .store import accounts
+from .store.accounts import META_SECRET_KEY, meta_get, meta_set
 
 log = logging.getLogger("sayit.auth")
+
+# 延迟取签名密钥：SessionMiddleware 在 import 期装配，但密钥要等建表后才在库里。
+def lazy_secret() -> str:
+    return session_secret()
 
 SESSION_KEY = "sayit_user"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30          # 30 天，自用够长，免得反复登录
@@ -41,31 +46,21 @@ _fails: dict[str, list[float]] = {}
 # 签名密钥
 # --------------------------------------------------------------------------
 def session_secret() -> str:
-    """签名密钥优先读 .env 的 SECRET_KEY；没有就落盘一份到 data/secret.key。
+    """签名密钥优先读环境变量 SECRET_KEY；没有就用库里存着的，再没有就生成一个存进库。
 
-    落盘的意义：重启服务不会把所有人踢下线。之前是每次随机生成，
-    一重启就得重新登录 —— 但这不该由用户去 .env 里手动维护。
+    存库而不是存 data/secret.key 的原因：整个部署只剩一个 sayit.db 需要备份，
+    不会出现「只恢复 db 忘了 secret.key，所有人都被踢下线」这种情况。
     """
     key = (os.environ.get("SECRET_KEY") or "").strip()
     if key:
         return key
-    try:
-        if SECRET_PATH.exists():
-            saved = SECRET_PATH.read_text(encoding="utf-8").strip()
-            if saved:
-                return saved
-        new_key = secrets.token_urlsafe(48)
-        SECRET_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SECRET_PATH.write_text(new_key, encoding="utf-8")
-        try:
-            SECRET_PATH.chmod(0o600)
-        except Exception:
-            pass
-        log.info("已生成登录签名密钥并保存到 %s", SECRET_PATH)
-        return new_key
-    except Exception:
-        log.warning("无法写入 %s，本次使用临时密钥：重启后需要重新登录", SECRET_PATH)
-        return secrets.token_urlsafe(48)
+    stored = meta_get(META_SECRET_KEY)
+    if stored:
+        return stored
+    new_key = secrets.token_urlsafe(48)
+    meta_set(META_SECRET_KEY, new_key)
+    log.info("已生成登录签名密钥并存入数据库（app_meta.%s）", META_SECRET_KEY)
+    return new_key
 
 
 # --------------------------------------------------------------------------

@@ -66,10 +66,12 @@ async def logout(request: Request) -> dict[str, Any]:
 
 
 @router.get("/health")
-async def health(user: str | None = None) -> dict[str, Any]:
+async def health(request: Request, user: str | None = None) -> dict[str, Any]:
     """顺带把运行环境报出来 —— 排障第一件要确认的就是"哪个 python 在跑"。"""
+    # 没带 user 参数时用当前登录的人；未登录就报 admin 那份（仅用于看 provider 名字）
+    who = user or (auth.current_user(request) or {}).get("username") or LEGACY_OWNER
     try:
-        provider = store.load_settings(user or LEGACY_OWNER)["active"]["provider"]
+        provider = store.load_settings(who)["active"]["provider"]
     except Exception:
         provider = ""
     return {

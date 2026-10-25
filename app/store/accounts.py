@@ -20,12 +20,11 @@ admin 账号：
     · 没有且环境变量没设 → 随机生成一个，打印到日志（只打印这一次）
   想重置密码：环境变量 SAYIT_ADMIN_PASSWORD_FORCE=1 再重启。
 
-老数据：data/users.csv 还在的话，首次启动会一次性导进来（同名账号不覆盖），
-导完改名成 users.csv.migrated，避免以后又导一遍。
+老数据不迁移：这是一个全新的部署形态，账号只在库里（账号/密码/配置都不会从
+任何 csv/json 文件导入）。admin 由 ensure_admin() 在首次启动时创建。
 """
 from __future__ import annotations
 
-import csv
 import hashlib
 import hmac
 import logging
@@ -34,7 +33,6 @@ import secrets
 import time
 from typing import Any
 
-from ..paths import DATA_DIR
 from .sqlite_conn import LOCK, _conn
 
 log = logging.getLogger("sayit.accounts")
@@ -45,7 +43,8 @@ ADMIN_DEFAULT_DISPLAY = "管理员"
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
 
-USERS_CSV = DATA_DIR / "users.csv"
+# 存在 app_meta 里的键
+META_SECRET_KEY = "secret_key"          # 登录 cookie 签名密钥
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
@@ -55,6 +54,13 @@ CREATE TABLE IF NOT EXISTS accounts (
     role          TEXT NOT NULL DEFAULT 'user',
     created_at    REAL NOT NULL,
     is_active     INTEGER NOT NULL DEFAULT 1
+);
+
+-- 杂项键值：签名密钥这类「只有一份」的运行时状态。
+-- 放库里以便整个部署只有一个 sayit.db 需要备份。
+CREATE TABLE IF NOT EXISTS app_meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
 );
 """
 
@@ -284,14 +290,16 @@ def ensure_admin() -> None:
     if generated:
         log.warning(
             "\n" + "=" * 62 +
-            "\n  已创建管理员账号（环境变量里没有 SAYIT_ADMIN_PASSWORD，随机生成）" +
+            "\n  已创建管理员账号（没给 SAYIT_ADMIN_PASSWORD，随机生成）" +
             f"\n    用户名: {ADMIN_USERNAME}" +
             f"\n    密码:   {password}" +
-            "\n  这个密码只显示这一次。想固定密码，在 .env 里设置" +
-            "\n    SAYIT_ADMIN_PASSWORD=你的密码  然后删掉账号重新创建。" +
+            "\n  这个密码只显示这一次。想固定密码：在 docker-compose.yml 的" +
+            "\n    environment 里写 SAYIT_ADMIN_PASSWORD: 你的密码" +
+            "\n  然后 docker compose down -v 后重新 up（会清空数据卷）——" +
+            "\n  或者直接登录后在「后台 · 人员管理」里改自己的密码。" +
             "\n" + "=" * 62)
     else:
-        log.info("已用环境变量 SAYIT_ADMIN_PASSWORD 创建管理员账号 %s", ADMIN_USERNAME)
+        log.info("已用 SAYIT_ADMIN_PASSWORD 创建管理员账号 %s", ADMIN_USERNAME)
 
 
 def _apply_password_if_changed(existing: dict[str, Any], env_password: str) -> None:
@@ -304,50 +312,24 @@ def _apply_password_if_changed(existing: dict[str, Any], env_password: str) -> N
     log.warning("已按 SAYIT_ADMIN_PASSWORD_FORCE 重置 %s 的密码", ADMIN_USERNAME)
 
 
-def import_legacy_csv(path=None) -> int:
-    """把老的 data/users.csv 导进库。同名账号跳过，导完改名留底。返回导入条数。"""
-    path = path or USERS_CSV
-    if not path.exists():
-        return 0
-    imported = 0
-    try:
-        with path.open("r", encoding="utf-8-sig", newline="") as f:
-            for row in csv.DictReader(f):
-                name = (row.get("username") or "").strip()
-                if not name or name.startswith("#"):
-                    continue
-                if get_user(name) is not None:
-                    continue
-                password = (row.get("password") or "").strip()
-                if not password:
-                    continue
-                with LOCK, _conn() as c:
-                    c.execute(
-                        "INSERT INTO accounts (username, password, display_name, role,"
-                        " created_at, is_active) VALUES (?,?,?,?,?,1)",
-                        (name, password, (row.get("display_name") or name).strip(),
-                         ROLE_ADMIN if name == ADMIN_USERNAME else ROLE_USER, time.time()))
-                imported += 1
-                log.info("从 users.csv 导入账号 %s", name)
-    except Exception:
-        log.exception("导入 %s 失败（不影响启动）", path)
-        return imported
+def meta_get(key: str) -> str:
+    """读 app_meta。没有或为空都返回空串。"""
+    with LOCK, _conn() as c:
+        row = c.execute("SELECT value FROM app_meta WHERE key=?", (key,)).fetchone()
+    return (row["value"] if row else "") or ""
 
-    try:
-        path.rename(path.with_suffix(".csv.migrated"))
-    except Exception:
-        log.warning("账号已导入，但 %s 改名失败，下次启动会再试", path)
-    return imported
+
+def meta_set(key: str, value: str) -> None:
+    with LOCK, _conn() as c:
+        c.execute("INSERT INTO app_meta (key, value) VALUES (?,?)"
+                  " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                  (key, value))
 
 
 def init_accounts() -> None:
-    """启动时调一次：建表 → 导老 CSV → 保证有 admin。"""
+    """启动时调一次：建表 → 保证有 admin。"""
     from .sqlite_conn import ensure_schema
     ensure_schema()
-    imported = import_legacy_csv()
-    if imported:
-        log.info("从老 users.csv 导入 %d 个账号（原文件已改名为 users.csv.migrated）",
-                 imported)
     ensure_admin()
 
 

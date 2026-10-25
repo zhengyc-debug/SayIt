@@ -33,9 +33,10 @@ else
   exit 1
 fi
 
-if [[ ! -f ".env" ]]; then
-  echo "[!] 找不到 .env —— 先 cp .env.example .env 并填入 Key" >&2
-  exit 1
+if [[ ! -d "data" ]]; then
+  echo "[i] 没有 data/ 目录，首次启动会自动创建（账号/配置/记录都在 data/sayit.db）"
 fi
 
+# 可选：想固定 admin 密码就在启动前 export SAYIT_ADMIN_PASSWORD=你的密码
+# （不设则随机生成并打印一次到日志；不需要 .env 文件）
 exec "$PY" main.py "$@"

@@ -11,8 +11,10 @@
 #   · sayit 不再发布到宿主机 —— 原来的 127.0.0.1:8787 在容器里用不上，
 #     反而会和宿主机上手工跑的 nginx 抢端口。要本机调试就加 profiles: ["debug"]。
 #
-# 数据全部落在命名卷 sayit-data：sayit.db（含 accounts 账号表）/ users/<名>/settings.json
-# / greetings / secret.key。删容器不丢数据。
+# 数据全部落在命名卷 sayit-data：
+#   sayit.db   ← 账号 + 每人配置 + 通话记录 + 错题本 + cookie 签名密钥，全在这一个文件
+#   greetings/ ← 开场白音频（空卷时从镜像自动补）
+# 删容器不丢数据。
 
 services:
   sayit:
@@ -37,13 +39,19 @@ services:
     environment:
       TZ: Asia/Shanghai
       LOG_LEVEL: INFO
-      # 首次启动创建 admin 用的密码。不填则随机生成，打印一次到日志。
-      # 已经有 admin 时这个值不会覆盖已有密码（防止重启把自己锁在外面）。
+
+      # ---------------------------------------------------------------
+      # 管理员密码：直接写在这里，不用 .env 文件。
+      #   · 首次启动（库里还没有 admin）用它创建 admin
+      #   · 已经有 admin 时**不会**覆盖 —— 后来改了这行也不会生效
+      #   · 想重置：把下面 SAYIT_ADMIN_PASSWORD_FORCE 改成 "1" 重启一次，
+      #             之后改回 "0"（不改回也没事，密码一致时就不会重复写库）
+      # ---------------------------------------------------------------
       SAYIT_ADMIN_PASSWORD: "123456"
-      # 忘了密码时的出口：设新密码 + 把下一行改成 1，重启一次即重置，之后改回 0。
-      # SAYIT_ADMIN_PASSWORD_FORCE: "1"
-      # 登录 cookie 签名密钥。不填会自动生成并保存到 data/secret.key。
-      # SECRET_KEY: ""
+      SAYIT_ADMIN_PASSWORD_FORCE: "0"
+
+      # 所有状态（账号 / 配置 / 通话记录 / cookie 签名密钥）都在
+      # /app/data/sayit.db 里，不依赖任何 .env 文件。
 
     expose:
       - "8787"          # 只对 sayit-net 内的容器开放，不对外
@@ -87,9 +95,9 @@ services:
 
     volumes:
       # 整份 nginx 配置（一次性挂进去，容器里不用再改）
-      - ./deploy/nginx/sayit.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/nginx/sayit.conf:/etc/nginx/conf.d/default.conf:ro
       # 证书目录：keeplearning.icu_bundle.crt / keeplearning.icu.key
-      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+      - /etc/nginx/certs:/etc/nginx/certs:ro
 
     logging:
       driver: json-file
