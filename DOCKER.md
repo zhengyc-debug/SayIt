@@ -95,8 +95,12 @@ docker compose exec sayit python -m app.store.accounts add zhangsan 密码 --dis
 docker compose exec sayit python -m app.store.accounts passwd zhangsan 新密码
 ```
 
-> 老版本留下的 `data/users.csv` 会在首次启动时**自动导入**（同名账号跳过），
+> 老版本留下的 `data/users.csv` 会在首次启动时**自动导入**（同名账号跳过、不覆盖已有密码），
 > 然后改名成 `users.csv.migrated`。老手写的 pbkdf2 哈希和明文都能继续登录。
+>
+> 想先看会导什么（不写库）：
+> `docker compose exec sayit python -m app.store.accounts import-csv --dry-run`
+> 真导：去掉 `--dry-run`；指定文件加 `--path /app/data/xxx.csv`。
 
 ---
 

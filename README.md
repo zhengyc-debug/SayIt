@@ -65,7 +65,8 @@ python -m app.store.accounts passwd zhangsan 新密码
 不该公开。HTML 一律走显式路由（受登录保护），`/static/*.html` 一律 404。
 后台的 `admin.js` 同理，走 `/admin.js` 这条受保护路由。
 
-老版本的 `data/users.csv` 已废弃：首次启动会自动导入并改名成 `users.csv.migrated`。
+老版本的 `data/users.csv` 会在首次启动时自动导入（同名账号跳过、不覆盖已有密码），改名成 `users.csv.migrated`。
+明文和老 pbkdf2 哈希都原样入库、都能登录。手动补导/预览：`python -m app.store.accounts import-csv [--dry-run] [--path 文件]`。
 
 ### 运行环境（重要）
 

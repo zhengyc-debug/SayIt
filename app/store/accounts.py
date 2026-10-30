@@ -20,8 +20,15 @@ admin 账号：
     · 没有且环境变量没设 → 随机生成一个，打印到日志（只打印这一次）
   想重置密码：环境变量 SAYIT_ADMIN_PASSWORD_FORCE=1 再重启。
 
-老数据不迁移：这是一个全新的部署形态，账号只在库里（账号/密码/配置都不会从
-任何 csv/json 文件导入）。admin 由 ensure_admin() 在首次启动时创建。
+老 CSV 一次性导入（migrate_legacy_csv / 命令行 `import-csv`）：
+  老版本用 data/users.csv（username,password,display_name）存账号。启动时会找
+  data/users.csv 和 data/users.csv.migrated，把库里的账号补齐：
+    · 库里没有的用户名 → 新建（哈希/明文原样搬进 password 列，登录照样能过，
+      下次改密码时自动升级成新哈希）
+    · 库里已有的用户名 → 跳过，绝不覆盖现有密码（宁可让人自己改，也不能
+      因为一次自动导入把能登录的密码换掉）
+  导入完把源文件改名成 users.csv.migrated 并在文件末尾追加一行注释，记录
+  「导入了哪个用户、什么时候」，重复启动不会重复导入（INSERT 前都查过）。
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import logging
 import os
 import secrets
 import time
+from pathlib import Path
 from typing import Any
 
 from .sqlite_conn import LOCK, _conn
@@ -327,10 +335,131 @@ def meta_set(key: str, value: str) -> None:
 
 
 def init_accounts() -> None:
-    """启动时调一次：建表 → 保证有 admin。"""
+    """启动时调一次：建表 → 导入老 CSV → 保证有 admin。"""
     from .sqlite_conn import ensure_schema
     ensure_schema()
+    try:
+        migrate_legacy_csv()
+    except Exception:  # 导入失败绝不能拦住启动（账号导不进去还能用命令行补）
+        log.exception("老 users.csv 导入失败，已跳过（账号可用命令行 import-csv 再试）")
     ensure_admin()
+
+
+# ---------------------------------------------------------------------------
+# 老 CSV 导入
+# ---------------------------------------------------------------------------
+LEGACY_CSV_NAME = "users.csv"          # 老版本的账号文件
+LEGACY_CSV_DONE_SUFFIX = ".migrated"   # 导入完改名成这个
+
+
+def _candidate_csv_paths() -> list[Any]:
+    """data/users.csv 和 data/users.csv.migrated（后者是为了一步没导全时还能补）。"""
+    from .. import paths
+    base = paths.DATA_DIR / LEGACY_CSV_NAME
+    return [base, base.with_name(LEGACY_CSV_NAME + LEGACY_CSV_DONE_SUFFIX)]
+
+
+def read_legacy_csv(path: Any) -> list[dict[str, str]]:
+    """读老 CSV，返回 [{username, password, display_name}]。
+
+    兼容 Excel 存出来的 BOM（utf-8-sig）、裸两列（没有表头）、# 注释行。
+    老文件只有三列，role 一律按 user；admin 由 ensure_admin() 保证存在。
+    """
+    import csv
+
+    rows: list[dict[str, str]] = []
+    # utf-8-sig：Windows 上用 Excel 存 CSV 会带 BOM，不这么读第一列会变成 "\ufeffusername"
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        for raw in reader:
+            if not raw or not (raw[0] or "").strip():
+                continue
+            first = raw[0].strip()
+            if first.startswith("#"):
+                continue
+            if first.lower() == "username":       # 表头
+                continue
+            name = first
+            password = (raw[1] if len(raw) > 1 else "").strip()
+            display = (raw[2] if len(raw) > 2 else "").strip() or name
+            rows.append({"username": name, "password": password, "display_name": display})
+    return rows
+
+
+def migrate_legacy_csv(dry_run: bool = False) -> dict[str, Any]:
+    """把老 users.csv 的账号补进库。幂等：库里已有的用户名跳过、不覆盖密码。
+
+    返回 {"created": [...], "skipped": [...], "invalid": [...], "source": 路径或 None}。
+    dry_run=True 只算不写（给命令行 --dry-run 用）。
+    """
+    source = next((p for p in _candidate_csv_paths() if p.is_file()), None)
+    if source is None:
+        return {"created": [], "skipped": [], "invalid": [], "source": None}
+    return migrate_legacy_csv_path(source, dry_run=dry_run)
+
+
+def migrate_legacy_csv_path(source: Any, dry_run: bool = False) -> dict[str, Any]:
+    """从指定路径导入（命令行 --path 用），其余语义同 migrate_legacy_csv。"""
+    report: dict[str, Any] = {"created": [], "skipped": [], "invalid": [],
+                              "source": str(source)}
+    if not Path(source).is_file():
+        raise FileNotFoundError(f"CSV 不存在：{source}")
+
+    for row in read_legacy_csv(source):
+        name = row["username"]
+        try:
+            name = validate_username(name)
+        except ValueError as e:
+            report["invalid"].append(f"{row['username']}: {e}")
+            continue
+
+        existing = get_user(name)
+        if existing is not None:
+            report["skipped"].append(name)
+            continue
+        if dry_run:
+            report["created"].append(name)
+            continue
+
+        # 老密码原样搬（明文 / 老哈希都行，verify_password 两种都认），
+        # 不走 create_user：老账号可能有不足 6 位的密码，而且这里不能重新哈希 ——
+        # 明文原文丢了就找不回来了。
+        with LOCK, _conn() as c:
+            c.execute(
+                "INSERT INTO accounts (username, password, display_name, role,"
+                " created_at, is_active) VALUES (?,?,?,?,?,1)",
+                (name, row["password"], row["display_name"], ROLE_USER, time.time()))
+        report["created"].append(name)
+
+    if report["created"] and not dry_run:
+        _mark_csv_imported(source, report["created"])
+        log.info("老 users.csv 导入完成：新建 %d 个账号 %s，跳过已存在 %d 个（来源 %s）",
+                 len(report["created"]), ", ".join(report["created"]),
+                 len(report["skipped"]), source)
+    return report
+
+
+def _mark_csv_imported(source: Any, created: list[str]) -> None:
+    """导入完改名成 users.csv.migrated，并在末尾追加一行导入记录。
+
+    追加注释而不是删文件：老密码的原文/老哈希只在这一个地方有，出问题还能翻回去。
+    """
+    target = source
+    if not str(source).endswith(LEGACY_CSV_DONE_SUFFIX):
+        target = source.with_name(source.name + LEGACY_CSV_DONE_SUFFIX)
+        if target.exists():
+            # 已经有一份 .migrated 了（比如上次导了一半又放了新的 users.csv）：
+            # 带时间戳另存，绝不覆盖上一次的备份。
+            target = source.with_name(
+                f"{source.name}{LEGACY_CSV_DONE_SUFFIX}.{int(time.time())}")
+        source.replace(target)
+    try:
+        with open(target, "a", encoding="utf-8", newline="") as f:
+            f.write(f"# imported {time.strftime('%Y-%m-%d %H:%M:%S')}: "
+                    f"{', '.join(created)}\n")
+    except OSError:
+        log.warning("没能往 %s 追加导入记录（账号已入库，不影响使用）", target)
+
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -355,6 +484,10 @@ if __name__ == "__main__":  # pragma: no cover
 
     p_list = sub.add_parser("list", help="列出账号")
 
+    p_imp = sub.add_parser("import-csv", help="把老 data/users.csv 导入库（已存在的跳过）")
+    p_imp.add_argument("--path", default="", help="指定 CSV 路径（默认 data/users.csv）")
+    p_imp.add_argument("--dry-run", action="store_true", help="只预览，不写库、不改文件")
+
     args = parser.parse_args()
     from .sqlite_conn import ensure_schema
     ensure_schema()
@@ -371,6 +504,22 @@ if __name__ == "__main__":  # pragma: no cover
         for u in list_users():
             flag = "" if u["is_active"] else "（已禁用）"
             print(f"{u['username']:<20} {u['role']:<6} {u['display_name']}{flag}")
+    elif args.cmd == "import-csv":
+        if args.path:
+            rep = migrate_legacy_csv_path(args.path, dry_run=args.dry_run)
+        else:
+            rep = migrate_legacy_csv(dry_run=args.dry_run)
+        if rep["source"] is None:
+            print("没找到 data/users.csv，也没找到 data/users.csv.migrated —— 无事可做")
+        else:
+            tag = "（预览，未写库）" if args.dry_run else ""
+            print(f"来源：{rep['source']} {tag}")
+            print(f"新建 {len(rep['created'])}: {', '.join(rep['created']) or '-'}")
+            print(f"跳过（库里已有）{len(rep['skipped'])}: {', '.join(rep['skipped']) or '-'}")
+            if rep["invalid"]:
+                print(f"用户名非法 {len(rep['invalid'])}:")
+                for line in rep["invalid"]:
+                    print(f"  {line}")
     else:
         parser.print_help()
         sys.exit(1)

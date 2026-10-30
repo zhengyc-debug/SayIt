@@ -263,8 +263,16 @@ sudo -u sayit ./.venv/bin/python -m app.store.accounts add zhangsan 密码 --dis
 sudo -u sayit ./.venv/bin/python -m app.store.accounts passwd zhangsan 新密码
 ```
 
-老版本的 `data/users.csv` 会在首次启动时自动导入（同名跳过），
-文件名改为 `users.csv.migrated`，之后以库为准。
+老版本的 `data/users.csv`（username,password,display_name）会在首次启动时自动导入
+（同名账号跳过 —— 不覆盖库里已有的密码），导完改名成 `users.csv.migrated` 并追加一行导入记录。
+明文密码和老 pbkdf2 哈希都原样入库、都能登录，下次改密码时自动升级成新哈希。
+不确定会导什么就先预览：
+
+```bash
+cd /opt/sayit
+sudo -u sayit ./.venv/bin/python -m app.store.accounts import-csv --dry-run
+sudo -u sayit ./.venv/bin/python -m app.store.accounts import-csv   # 真导
+```
 
 `.env` 里务必设一个固定的 `SECRET_KEY`（否则每次重启服务所有人要重新登录）：
 
