@@ -246,45 +246,6 @@ function renderRules() {
   });
 }
 
-function renderMistakes() {
-  $('cnt').textContent = errors.length ? T('{n} 条', { n: errors.length }) : '';
-  $('mistakes').innerHTML = errors.length
-    ? errors.map(e => `
-        <div class="mistake">
-          <div class="m-body">
-            <div><span class="said">${esc(e.you_said)}</span>
-                 <span style="color:var(--fg-3)">→</span>
-                 <span class="better">${esc(e.better)}</span>
-                 <span class="type-badge">${T(TYPE[e.type] || e.type)}</span></div>
-            ${e.why ? `<div class="why">${esc(e.why)}</div>` : ''}
-          </div>
-          <button class="card-del" data-err="${e.id}" title="${T('移出错题本')}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
-                 stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-          </button>
-        </div>`).join('')
-    : '<div class="empty">错题本是空的。</div>';
-
-  // 单条移出：不弹确认（用户要求点了就删）。删除会触发后台归纳，
-  // 所以等一下再刷新，让刚学到的规则当场出现。
-  $('mistakes').querySelectorAll('[data-err]').forEach(b => {
-    b.onclick = async () => {
-      const node = b.closest('.mistake');
-      b.disabled = true;
-      if (node) node.classList.add('going');
-      const r = await fetch('/api/errors/' + b.dataset.err, { method: 'DELETE' })
-        .then(x => x.json()).catch(() => ({}));
-      if (!r.ok) {
-        b.disabled = false;
-        if (node) node.classList.remove('going');
-        return;
-      }
-      await new Promise(res => setTimeout(res, 900));
-      await loadAll();
-    };
-  });
-}
-
 async function learnNow() {
   const btn = $('learn');
   if (btn) { btn.disabled = true; btn.textContent = T('归纳中…'); }
