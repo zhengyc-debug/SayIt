@@ -251,6 +251,15 @@ def public_settings(username: str) -> dict[str, Any]:
     return s
 
 
+# 掩码形态：前端把 GET 回来的 api_key 原样 PUT 回来时，值长这样
+# （xxxxxxxxxxxx + 「…已配置」）。这种值必须当作「不改」，不能当成新 Key 存进去。
+MASK_MARK = "…"
+
+
+def _looks_masked(key: str) -> bool:
+    return bool(key) and (MASK_MARK in key or "已配置" in key or "***" in key or "*" in key)
+
+
 def apply_public_patch(username: str, patch: dict[str, Any]) -> dict[str, Any]:
     """前端的写操作：api_key 为空串或掩码形态时视为"不改"。"""
     patch = deepcopy(patch or {})
@@ -258,13 +267,13 @@ def apply_public_patch(username: str, patch: dict[str, Any]) -> dict[str, Any]:
     if isinstance(patch.get("llm"), dict):
         conf = patch["llm"]
         key = conf.get("api_key")
-        if key is not None and (not key or "*" in key):
+        if key is not None and (not key or _looks_masked(key)):
             conf.pop("api_key", None)
     for _pid, conf in provs.items():
         if not isinstance(conf, dict):
             continue
         key = conf.get("api_key")
-        if key is not None and (not key or "*" in key):
+        if key is not None and (not key or _looks_masked(key)):
             conf.pop("api_key", None)
         conf.pop("api_key_masked", None)
         conf.pop("api_key_set", None)

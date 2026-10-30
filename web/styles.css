@@ -43,6 +43,11 @@
   --hover-2: rgba(255, 255, 255, .1);
   --tabbar-bg: rgba(10, 14, 22, .88);
   --toast-bg: rgba(18, 24, 36, .97);
+  /* toast 自带深底 → 字必须用亮色，跟主题的 --fg 无关 */
+  --toast-ink: #eef2fb;
+  --toast-line: rgba(255, 255, 255, .22);
+  --toast-line-err: rgba(255, 107, 107, .65);
+  --toast-accent-err: #ff8080;
   --modal-bg: linear-gradient(180deg, #141b28, #0e131d);
   --modal-veil: rgba(5, 8, 13, .74);
   --track: rgba(255, 255, 255, .09);
@@ -101,7 +106,11 @@
   --hover: rgba(16, 24, 40, .05);
   --hover-2: rgba(16, 24, 40, .08);
   --tabbar-bg: rgba(255, 255, 255, .92);
-  --toast-bg: #1b2231;
+  --toast-bg: #1b2231;                  /* 浅色主题里 toast 仍是深底：浮层压在白页面上更清楚 */
+  --toast-ink: #f2f5fb;                 /* 深底亮字，对比度 ~13:1 */
+  --toast-line: rgba(255, 255, 255, .24);
+  --toast-line-err: rgba(255, 128, 128, .7);
+  --toast-accent-err: #ff8f8f;
   --modal-bg: linear-gradient(180deg, #ffffff, #f8fafe);
   --modal-veil: rgba(17, 24, 39, .38);
   --track: rgba(16, 24, 40, .1);
@@ -795,14 +804,17 @@ body.in-call .idle { display: none; }
 .resume-dot { color: var(--accent); font-weight: 700; }
 
 /* ------------------------------------------------------------------ 提示 */
+/* toast 有自己的深色底（--toast-bg），**不能**用 --fg/--line-strong 上色：
+   浅色主题下 --fg 是近黑的 #111827，压在深底上对比度只有 ~1.2:1，字等于看不见。
+   所以这里给 toast 配一套独立的「深底亮字」变量，两套主题都成立。 */
 .toast {
   position: fixed;
   left: 50%;
   bottom: calc(var(--nav-h) + 100px + env(safe-area-inset-bottom));
   transform: translateX(-50%) translateY(8px);
   background: var(--toast-bg);
-  border: 1px solid var(--line-strong);
-  color: var(--fg);
+  border: 1px solid var(--toast-line);
+  color: var(--toast-ink);
   padding: 12px 16px;
   border-radius: 13px;
   font-size: 13.5px;
@@ -815,7 +827,15 @@ body.in-call .idle { display: none; }
   box-shadow: 0 20px 50px -18px rgba(0, 0, 0, .9);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast.err { border-color: color-mix(in srgb, var(--err) 50%, transparent); }
+.toast.err { border-color: var(--toast-line-err); }
+.toast.err::before {
+  /* 左侧竖条：不靠颜色区分严重程度，色弱也能看出来这是个错误 */
+  content: "";
+  position: absolute;
+  left: 0; top: 10px; bottom: 10px; width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--toast-accent-err);
+}
 
 /* ------------------------------------------------------------------ 弹层 */
 .modal {

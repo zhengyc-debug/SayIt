@@ -35,8 +35,13 @@ Rules:
 - Output ONLY valid JSON. No markdown fences, no commentary before or after.
 - Write all human-readable fields in {ui_language} (the learner's native language),
   but keep the English sentences being discussed in English.
-- Pick only the 3-6 most valuable corrections. Skip trivial issues. Skip anything
-  the learner got right. If the learner made almost no mistakes, return fewer.
+- Go through the WHOLE transcript and pick corrections from ALL parts of it. Never
+  cluster them at the beginning: if the learner spoke for 10 minutes, the mistakes
+  they made in the last 3 minutes matter as much as the first 3.
+- A short call needs 3-6 corrections. A long call (many turns) may warrant up to
+  8. Pick the most valuable ones first, but spread them across the whole call.
+- Skip trivial issues. Skip anything the learner got right. If the learner made
+  almost no mistakes, return fewer.
 - Be specific: "better" must be something the learner would actually say in a
   phone conversation, not textbook prose.
 - Do not invent mistakes that are not in the transcript.
@@ -48,6 +53,8 @@ SCHEMA_HINT = """Return exactly this JSON shape:
   "level": "<CEFR estimate: A1|A2|B1|B2|C1>",
   "score": {"grammar": <0-10>, "fluency": <0-10>, "vocabulary": <0-10>},
   "errors": [
+    /* 3-6 items for a short call, up to 8 for a long one; ordered so consecutive
+       items come from DIFFERENT parts of the call, not all from the first minute */
     {"you_said": "<learner's exact words, English, verbatim>",
      "better": "<natural phrasing, English>",
      "why": "<one sentence in <<UI>> explaining the mistake, do not lecture>",
@@ -78,6 +85,9 @@ def _ui_lang_code(ui_lang: str | None) -> str:
 # 单块放多少条字幕。DeepSeek 128k 上下文，一次全塞进去也能行，
 # 但 60 分钟的对话全塞会让模型「跳读」；切成块逐块看，覆盖更稳。
 CHUNK_TURNS = 60
+# 一份复盘最多输出多少条错误。给模型的上限是 3-6（短）/8（长），
+# 这里留一点余量：模型多给了不该被最后一步砍掉，但也不能让 UI 无限长。
+MAX_ERRORS = 12
 # 一份复盘模型最多扫多少块（约 60 句 × 24 = 1400 句，远超 60 分钟通话的量）
 MAX_CHUNKS = 24
 
@@ -203,6 +213,13 @@ def _build_messages(turns: list[dict[str, Any]], language: str, level: str,
         if meta.get("total_turns"):
             parts.append(f"The full call is {meta['total_turns']} lines "
                          f"({meta.get('minutes', 0)} min of speech). Every line is included below.")
+        if meta.get("chunks", 0) > 1:
+            # 分块扫过的长通话：明确要求按块分配名额，否则模型默认只挑开头几条
+            parts.append(
+                f"This call was split into {meta['chunks']} chunks and every chunk was "
+                f"read. Spread your corrections across the chunks: at least one per chunk "
+                f"where the learner actually made a mistake, and do not draw more than "
+                f"half of them from the first chunk.")
     if meta and meta.get("rules_block"):
         parts.append(meta["rules_block"])
     if digest and digest.get("prefindings"):
@@ -277,7 +294,7 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
             return default
 
     errors = []
-    for e in (raw.get("errors") or [])[:8]:
+    for e in (raw.get("errors") or [])[:MAX_ERRORS]:
         if not isinstance(e, dict):
             continue
         said, better = (e.get("you_said") or "").strip(), (e.get("better") or "").strip()
@@ -380,6 +397,7 @@ async def generate(user: str, session_id: str, force: bool = False,
                               meta={"continuation": bool(parent_id) and parent_id != session_id,
                                     "includes_parent": scope_note == "continued",
                                     "rules_block": rules_block,
+                                    "chunks": len(chunks),
                                     "total_turns": len([t for t in turns
                                                         if (t.get("text") or "").strip()]),
                                     "minutes": minutes})
