@@ -22,6 +22,7 @@ from typing import Any
 
 from ..store import db
 from ..store import settings as store_settings
+from .. import error_categories
 from ..languages import get_language
 from .llm import LLMError, chat, conf_for
 from . import mistake_rules
@@ -35,13 +36,16 @@ Rules:
 - Output ONLY valid JSON. No markdown fences, no commentary before or after.
 - Write all human-readable fields in {ui_language} (the learner's native language),
   but keep the English sentences being discussed in English.
-- Go through the WHOLE transcript and pick corrections from ALL parts of it. Never
-  cluster them at the beginning: if the learner spoke for 10 minutes, the mistakes
-  they made in the last 3 minutes matter as much as the first 3.
-- A short call needs 3-6 corrections. A long call (many turns) may warrant up to
-  8. Pick the most valuable ones first, but spread them across the whole call.
-- Skip trivial issues. Skip anything the learner got right. If the learner made
-  almost no mistakes, return fewer.
+- Go through the WHOLE transcript. Report EVERY mistake the learner actually made,
+  not a sample: this feed is studied later, so a missed mistake is lost forever.
+  At the same time the learner is a BEGINNER and makes a lot of mistakes, so:
+- Merge near-duplicates. If they said the same wrong thing three times, report it
+  ONCE (use the clearest instance) — do not list the same error repeatedly.
+- Set "priority": 1-30 means "fix this first, it blocks communication"; 31-60 means
+  "important but not blocking"; 61+ means "polish". Use the whole range honestly.
+- Set "category" to exactly one code from the list below. Pick the most specific
+  one that fits; use "other" only if nothing fits.
+- Report only mistakes the learner made. Skip anything they got right.
 - Be specific: "better" must be something the learner would actually say in a
   phone conversation, not textbook prose.
 - Do not invent mistakes that are not in the transcript.
@@ -53,12 +57,12 @@ SCHEMA_HINT = """Return exactly this JSON shape:
   "level": "<CEFR estimate: A1|A2|B1|B2|C1>",
   "score": {"grammar": <0-10>, "fluency": <0-10>, "vocabulary": <0-10>},
   "errors": [
-    /* 3-6 items for a short call, up to 8 for a long one; ordered so consecutive
-       items come from DIFFERENT parts of the call, not all from the first minute */
     {"you_said": "<learner's exact words, English, verbatim>",
      "better": "<natural phrasing, English>",
      "why": "<one sentence in <<UI>> explaining the mistake, do not lecture>",
-     "type": "grammar|tense|word|order|pronunciation"}
+     "type": "grammar|tense|word|order|pronunciation",
+     "category": "<one code from the category list>",
+     "priority": <1-100, lower = fix first>}
   ],
   "new_words": [{"word": "<English expression>", "meaning": "<meaning in <<UI>>>"}],
   "topics": ["<2-4 lowercase English words for what was actually discussed, e.g. travel, food, job hunting>"],
@@ -85,9 +89,10 @@ def _ui_lang_code(ui_lang: str | None) -> str:
 # 单块放多少条字幕。DeepSeek 128k 上下文，一次全塞进去也能行，
 # 但 60 分钟的对话全塞会让模型「跳读」；切成块逐块看，覆盖更稳。
 CHUNK_TURNS = 60
-# 一份复盘最多输出多少条错误。给模型的上限是 3-6（短）/8（长），
-# 这里留一点余量：模型多给了不该被最后一步砍掉，但也不能让 UI 无限长。
-MAX_ERRORS = 12
+# 复盘正文（语音通话结束后弹出的报告）里最多展示几条。
+# 注意：**入库不受这个限制** —— 模型报出来的每条错都会写进 errors 表，
+# 只是正文里挑 15 条有代表性的给你看，其余在错题本里按类别分组随时可查。
+REPORT_ERROR_LIMIT = 15
 # 一份复盘模型最多扫多少块（约 60 句 × 24 = 1400 句，远超 60 分钟通话的量）
 MAX_CHUNKS = 24
 
@@ -154,7 +159,7 @@ def _merge_chunks(scans: list[dict[str, Any]]) -> dict[str, Any]:
     phrases: list[str] = []
     topics: list[str] = []
     for sc in scans:
-        for e in (sc.get("errors") or [])[:20]:
+        for e in (sc.get("errors") or [])[:60]:
             if not isinstance(e, dict):
                 continue
             said = str(e.get("said") or "").strip()
@@ -173,7 +178,9 @@ def _merge_chunks(scans: list[dict[str, Any]]) -> dict[str, Any]:
             t = str(t).strip().lower()
             if t and t not in topics:
                 topics.append(t)
-    return {"errors": errors[:60], "phrases": phrases[:40], "topics": topics[:12],
+    # 候选上限放宽到 200：这是喂给「最终汇总」的证据池，汇总阶段要按它出全量。
+    # 以前卡在 60 会让长通话的后半段错误进不了汇总（又是「总结不全」的来源之一）。
+    return {"errors": errors[:200], "phrases": phrases[:40], "topics": topics[:12],
             "chunks": len(scans)}
 
 
@@ -228,15 +235,20 @@ def _build_messages(turns: list[dict[str, Any]], language: str, level: str,
             lines_e = "\n".join(
                 f"- {e['you_said']} => {e['better']}"
                 + (f"  ({e['why']})" if e.get("why") else "")
-                for e in d["errors"][:40])
-            parts.append("Pre-scan of this call (every chunk was read; candidates NOT yet "
-                         "filtered):\n" + lines_e)
+                for e in d["errors"][:120])
+            parts.append(
+                "Pre-scan of this call (every chunk was read; candidates NOT yet filtered). "
+                "This is EVIDENCE, not the final answer — it may miss, duplicate or "
+                "miscategorise things. Read the full transcript below and report every "
+                "real mistake, using this list to make sure you do not miss any:\n" + lines_e)
         if d.get("phrases"):
             parts.append("Expressions that came up: " + ", ".join(d["phrases"][:30]))
         if d.get("topics"):
             parts.append("Topics actually discussed: " + ", ".join(d["topics"][:12]))
         parts.append("Use the pre-scan as evidence, but write your review from the FULL "
                      "transcript. Do not invent anything outside it.")
+    parts.append("Category codes — pick exactly one per error, most specific first:\n"
+                 + error_categories.prompt_block())
     parts.append(f"Transcript:\n{convo}")
     parts.append(SCHEMA_HINT.replace("<<UI>>", ui_name))
     user = "\n\n".join(parts)
@@ -294,17 +306,32 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
             return default
 
     errors = []
-    for e in (raw.get("errors") or [])[:MAX_ERRORS]:
+    seen: set[str] = set()
+    for e in (raw.get("errors") or []):
         if not isinstance(e, dict):
             continue
         said, better = (e.get("you_said") or "").strip(), (e.get("better") or "").strip()
         if not said or not better:
             continue
+        # 同一句错话只留一条（模型偶尔会在长转录里把同一个错误报两遍）
+        key = said.lower()
+        if key in seen:
+            continue
+        seen.add(key)
         t = (e.get("type") or "grammar").strip().lower()
         if t not in ("grammar", "tense", "word", "order", "pronunciation"):
             t = "grammar"
+        # category 由模型给二级 code；给不出来就按一级 type 退化，最后兜底 other
+        cat = error_categories.normalize(e.get("category"), t)
+        try:
+            prio = max(1, min(100, int(e.get("priority", 50))))
+        except (TypeError, ValueError):
+            prio = 50
         errors.append({"you_said": said, "better": better,
-                       "why": (e.get("why") or "").strip(), "type": t})
+                       "why": (e.get("why") or "").strip(), "type": t,
+                       "category": cat, "priority": prio})
+    # 入库顺序 = 优先级（小的先），同优先级保持模型给的原始顺序
+    errors.sort(key=lambda x: x["priority"])
 
     words = []
     for w in (raw.get("new_words") or [])[:10]:
@@ -401,12 +428,16 @@ async def generate(user: str, session_id: str, force: bool = False,
                                     "total_turns": len([t for t in turns
                                                         if (t.get("text") or "").strip()]),
                                     "minutes": minutes})
+    # 全量入库意味着模型要吐出几十条错误（每条含 原话/改法/解释/类别/优先级）。
+    # 1500 token 装不下，JSON 会被截断成非法格式 —— 那就是「总结不全」的另一条暗线。
+    # 按错误条数动态给额度，下限 2000、上限 8000（DeepSeek 支持到 8k 输出）。
     text = await chat(
         messages,
         base_url=llm_conf.get("base_url", ""),
         api_key=llm_conf.get("api_key", ""),
         model=llm_conf.get("model", "deepseek-chat"),
         temperature=float(llm_conf.get("temperature", 0.3)),
+        max_tokens=max(2000, min(8000, 600 + 120 * max(len(chunks), 1))),
     )
     raw = _extract_json(text)
     if raw is None:
@@ -415,13 +446,10 @@ async def generate(user: str, session_id: str, force: bool = False,
         raise LLMError("模型没有返回合法 JSON，可以点『重新生成』再试一次")
 
     payload = _normalize(raw)
+    all_errors = payload["errors"]          # 模型报出来的全部错误（可能几十条）
     # prompt 求过一遍还不够：模型在长转录里常常照记。这里按规则做一次硬过滤，
     # 被剔掉的照样入库（hidden=1 + rule_id），用户在错题本里能恢复。
-    kept, dropped = mistake_rules.filter_errors(user, payload["errors"])
-    if dropped:
-        payload["filtered_by_rules"] = [
-            {"you_said": e.get("you_said"), "rule_id": rid} for e, rid in dropped]
-        payload["errors"] = kept
+    kept, dropped = mistake_rules.filter_errors(user, all_errors)
     payload["generated_at"] = time.time()
     payload["model"] = llm_conf.get("model", "")
     payload["ui_lang"] = ui_lang      # 这份解释是用哪种母语写的
@@ -434,9 +462,20 @@ async def generate(user: str, session_id: str, force: bool = False,
         "own_turns": len([t for t in (row.get("turns") or []) if (t.get("text") or "").strip()]),
         "includes_parent": scope_note == "continued",
         "new_only": new_only,
+        # 这次一共找到多少条、复盘正文展示多少条、其余收进错题本
+        "found": len(kept),
+        "shown": min(len(kept), REPORT_ERROR_LIMIT),
     }
+    # ---- 正文只显示 REPORT_ERROR_LIMIT 条，但「全部」都要入库 --------------
+    # 展示：按优先级取前 N 条，并且保证覆盖多种类别（否则前 15 条可能全是时态，
+    # 用户看完还是不知道自己的介词问题）。_pick_representative 负责这件事。
+    payload["errors"] = _pick_representative(kept, REPORT_ERROR_LIMIT)
+    if len(kept) > len(payload["errors"]):
+        payload["errors_omitted"] = len(kept) - len(payload["errors"])
+
     db.save_report(user, session_id, payload)
-    db.replace_errors(user, session_id, payload["errors"])
+    # 入库用全量（kept），不是 payload["errors"] —— 这正是不截断的地方。
+    db.replace_errors(user, session_id, kept)
     # 被规则移出的也存下来，只是看不见；删错了可以恢复
     if dropped:
         db.replace_errors(user, session_id, [e for e, _ in dropped],
@@ -446,9 +485,46 @@ async def generate(user: str, session_id: str, force: bool = False,
         db.add_words(user, session_id, payload["new_words"], ui_lang=ui_lang)
     except Exception:
         log.exception("写入生词本失败（不影响复盘）")
-    log.info("复盘完成 %s：%d 条错误 %d 个生词", session_id,
-             len(payload["errors"]), len(payload["new_words"]))
+    log.info("复盘完成 %s：全量入库 %d 条，正文展示 %d 条，%d 个生词",
+             session_id, len(kept), len(payload["errors"]), len(payload["new_words"]))
     return payload
+
+
+def _pick_representative(errors: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """从全部错误里挑 limit 条放进复盘正文：优先高优先级，同时强制跨类别。
+
+    为什么不直接取前 15 条：模型的 priority 是逐条打的，很容易前 15 条全落在
+    「时态」一个类别里（因为那类错误最多）。用户看完以为「我只用练时态」，
+    而实际上他的介词问题同样严重 —— 那 15 条就白给了。
+
+    做法：轮转取类别。按类别把错误分桶（桶内按 priority 升序），然后一轮一轮
+    从每个桶里各取一条，直到取满 limit。这样前 15 条一定能覆盖尽量多的类别。
+    """
+    if not errors or limit <= 0:
+        return []
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for e in errors:
+        buckets.setdefault(e.get("category") or "other", []).append(e)
+    for b in buckets.values():
+        b.sort(key=lambda x: x.get("priority", 100))
+
+    # 桶的顺序：先展示条数多的、问题更重的类别（桶内最小 priority 越小越靠前）
+    order = sorted(buckets, key=lambda c: (buckets[c][0].get("priority", 100), -len(buckets[c])))
+
+    picked: list[dict[str, Any]] = []
+    depth = 0
+    while len(picked) < limit and depth < max(len(b) for b in buckets.values()):
+        added = False
+        for cat in order:
+            if depth < len(buckets[cat]):
+                picked.append(buckets[cat][depth])
+                added = True
+                if len(picked) >= limit:
+                    break
+        if not added:
+            break
+        depth += 1
+    return picked
 
 
 def focus_hint(user: str, limit_sessions: int = 6) -> str:

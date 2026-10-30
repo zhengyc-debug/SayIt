@@ -261,7 +261,25 @@ cd /opt/sayit
 sudo -u sayit ./.venv/bin/python -m app.store.accounts list
 sudo -u sayit ./.venv/bin/python -m app.store.accounts add zhangsan 密码 --display 张三
 sudo -u sayit ./.venv/bin/python -m app.store.accounts passwd zhangsan 新密码
+sudo -u sayit ./.venv/bin/python -m app.store.accounts promote zhangsan   # 提升为管理员
 ```
+
+### 给历史错题补分类
+
+错题本按「知识点」分组（介词搭配 / 冠词 / 时态-过去式 …），但分类字段只对
+新生成的复盘有效。**加分类之前**入库的老错题会全挤在「其他」组，跑一次这个脚本补上：
+
+```bash
+cd /opt/sayit
+sudo -u sayit ./.venv/bin/python tools/backfill_categories.py --dry-run   # 先看会怎么归
+sudo -u sayit ./.venv/bin/python tools/backfill_categories.py             # 真跑
+sudo -u sayit ./.venv/bin/python tools/backfill_categories.py --user admin  # 只处理一个人
+sudo -u sayit ./.venv/bin/python tools/backfill_categories.py --no-llm     # 不调模型，只按关键词猜
+```
+
+- 用「设置 → 复盘用文本模型」里配的 Key 调模型归类，一次一批，准且省
+- 模型不可用或某条猜不出时，按关键词兜底；还猜不出的留在「其他」，**可以重复跑**
+- 已分类的行不会被重复处理（幂等）
 
 老版本的 `data/users.csv`（username,password,display_name）会在首次启动时自动导入
 （同名账号跳过 —— 不覆盖库里已有的密码），导完改名成 `users.csv.migrated` 并追加一行导入记录。

@@ -30,6 +30,36 @@ async def list_errors(limit: int = 50, user: str = Depends(current_user)) -> dic
     return {"errors": db.top_errors(user, limit), "counts": db.error_counts(user)}
 
 
+@router.get("/errors/grouped")
+async def list_errors_grouped(per_category: int = 200,
+                              user: str = Depends(current_user)) -> dict[str, Any]:
+    """错题本首页：按二级类别分组。每组带条数、最新时间、以及该组最近 N 条。
+
+    前端先渲染「分类卡片」（用词-介词搭配 12 条 / 时态-过去式 8 条 …），
+    点开某个卡片再请求该组的明细 —— 初学者一通电话就几十条，全铺开没法看。
+    """
+    from .. import error_categories
+    groups = db.error_groups(user, per_category=per_category)
+    for g in groups:
+        g["label"] = error_categories.label(g["category"])
+        g["type"] = error_categories.type_of(g["category"])
+    total = sum(g["count"] for g in groups)
+    return {"groups": groups, "total": total, "counts": db.error_counts(user)}
+
+
+@router.get("/error-categories")
+async def list_categories() -> dict[str, Any]:
+    """全部可用的二级类别（前端做筛选/图例用）。"""
+    from .. import error_categories
+    return {
+        "categories": [
+            {"code": code, "label": zh, "type": t, "hint": en}
+            for code, (zh, en, t) in error_categories.CATEGORIES.items()
+        ],
+        "types": error_categories.TYPES,
+    }
+
+
 @router.delete("/errors/{error_id}")
 async def delete_error(error_id: int, user: str = Depends(current_user)) -> dict[str, Any]:
     """从错题本移出一条错题（不物理删，可恢复），并在后台学一次偏好规则。

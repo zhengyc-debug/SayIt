@@ -803,6 +803,40 @@ body.in-call .idle { display: none; }
 .resume-box .nx { color: var(--fg-3); }
 .resume-dot { color: var(--accent); font-weight: 700; }
 
+/* --------------------------------------------------- 错题本：分类卡片 */
+/* 错题本首页只看这一层：每个知识点一张卡。初学者错题多，全铺开没法看。 */
+.catgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.catcard {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 13px 14px;
+  text-align: left;
+  background: var(--card-grad);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color .15s, transform .12s, background .15s;
+}
+.catcard:hover { border-color: var(--line-strong); background: var(--hover); }
+.catcard:active { transform: scale(.985); }
+.cc-top { display: flex; align-items: baseline; gap: 8px; }
+.cc-name { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.cc-n {
+  margin-left: auto; font-size: 19px; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--fg);
+}
+.cc-bar { height: 4px; }
+.cc-sub { font-size: 11.5px; color: var(--fg-3); }
+
+/* 明细里每条错题的日期（分辨「最近又犯了」还是老问题） */
+.m-meta { margin-top: 5px; font-size: 11.5px; color: var(--fg-3); }
+
 /* ------------------------------------------------------------------ 提示 */
 /* toast 有自己的深色底（--toast-bg），**不能**用 --fg/--line-strong 上色：
    浅色主题下 --fg 是近黑的 #111827，压在深底上对比度只有 ~1.2:1，字等于看不见。

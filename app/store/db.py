@@ -55,7 +55,9 @@ CREATE TABLE IF NOT EXISTS errors (
     better      TEXT NOT NULL,
     why         TEXT,
     type        TEXT NOT NULL,
-    ts          REAL NOT NULL
+    ts          REAL NOT NULL,
+    category    TEXT DEFAULT '',
+    priority    INTEGER DEFAULT 100
 );
 
 CREATE TABLE IF NOT EXISTS profile (
@@ -101,7 +103,13 @@ _ADD_COLUMNS = {
     "reports": [("user", "TEXT NOT NULL DEFAULT ''")],
     "errors": [("user", "TEXT NOT NULL DEFAULT ''"),
                ("hidden", "INTEGER DEFAULT 0"),      # 1 = 被偏好规则移出错题本
-               ("rule_id", "INTEGER")],              # 是哪条规则移出的
+               ("rule_id", "INTEGER"),               # 是哪条规则移出的
+               # 二级分类（介词搭配 / 冠词 / 时态-过去式 …），见 app/error_categories.py。
+               # 老库的老行没有这个值，读出来是空串，前端会归到「其他」。
+               ("category", "TEXT DEFAULT ''"),
+               # 0 = 普通；数字越小越「值得先看」。复盘正文只挑靠前的十几条，
+               # 但所有错误都入库 —— 入库和展示是两件事。
+               ("priority", "INTEGER DEFAULT 100")],
 }
 
 
@@ -145,6 +153,8 @@ def _migrate(c: sqlite3.Connection) -> None:
     c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user"
               " ON sessions(user, started_at DESC)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_errors_user ON errors(user, ts DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_errors_cat"
+              " ON errors(user, category, ts DESC)")
     # 生词要去重（同一个词在多通电话里出现只留最早上次出现的一条）
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_words_user_word"
               " ON words(user, lower(word))")
@@ -447,12 +457,16 @@ def replace_errors(user: str, session_id: str, errors: list[dict[str, Any]],
         rows = []
         for e in errors:
             rid = (rule_map or {}).get(id(e))
+            try:
+                prio = int(e.get("priority", 100))
+            except (TypeError, ValueError):
+                prio = 100
             rows.append((session_id, user, e.get("you_said", ""), e.get("better", ""),
                          e.get("why", ""), e.get("type", "grammar"), 1 if hidden else 0,
-                         rid, now))
+                         rid, now, e.get("category", "") or "", prio))
         c.executemany(
             "INSERT INTO errors (session_id, user, you_said, better, why, type,"
-            " hidden, rule_id, ts) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+            " hidden, rule_id, ts, category, priority) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
 
 
 def error_type_stats(user: str, limit_sessions: int = 6) -> dict[str, int]:
@@ -471,11 +485,42 @@ def top_errors(user: str, limit: int = 50) -> list[dict[str, Any]]:
     with _lock, _conn() as c:
         rows = c.execute(
             "SELECT e.id, e.you_said, e.better, e.why, e.type, e.ts, s.started_at,"
-            " e.session_id"
+            " e.session_id, COALESCE(e.category,'') AS category,"
+            " COALESCE(e.priority,100) AS priority"
             " FROM errors e JOIN sessions s ON s.id = e.session_id"
             " WHERE e.user=? AND COALESCE(e.hidden,0)=0"
             " ORDER BY e.ts DESC LIMIT ?", (user, limit)).fetchall()
     return [dict(r) for r in rows]
+
+
+def error_groups(user: str, per_category: int = 200) -> list[dict[str, Any]]:
+    """错题本首页用：按二级类别分组，每组带条数 + 该组最新的几条。
+
+    为什么在 SQL 端分组而不是前端全量拿下来再 groupBy：错题本会越积越多（初学者
+    一通电话就几十条），一次性把几千条传到手机上是浪费。这里每个类别只取最近的
+    per_category 条，够展开看就行；总数单独用 COUNT 给。
+    """
+    with _lock, _conn() as c:
+        # 先拿「每个类别有多少条 + 最近一条的时间」，决定卡片顺序（多的在前，同龄看新）
+        summary = c.execute(
+            "SELECT COALESCE(NULLIF(category,''),'other') AS cat, COUNT(*) n,"
+            " MAX(ts) latest"
+            " FROM errors WHERE user=? AND COALESCE(hidden,0)=0"
+            " GROUP BY cat ORDER BY n DESC, latest DESC", (user,)).fetchall()
+
+        groups: list[dict[str, Any]] = []
+        for row in summary:
+            cat = row["cat"]
+            rows = c.execute(
+                "SELECT e.id, e.you_said, e.better, e.why, e.type, e.ts,"
+                " COALESCE(e.category,'') AS category, COALESCE(e.priority,100) AS priority"
+                " FROM errors e"
+                " WHERE e.user=? AND COALESCE(e.hidden,0)=0"
+                "   AND COALESCE(NULLIF(e.category,''),'other')=?"
+                " ORDER BY e.ts DESC LIMIT ?", (user, cat, per_category)).fetchall()
+            groups.append({"category": cat, "count": int(row["n"]),
+                           "latest": row["latest"], "errors": [dict(r) for r in rows]})
+    return groups
 
 
 def error_counts(user: str) -> dict[str, int]:
